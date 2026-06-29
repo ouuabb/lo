@@ -1,0 +1,43 @@
+{
+  "name": "@yourname/note-cli",
+  "version": "1.0.0",
+  "description": "命令行Markdown笔记管理工具",
+  "main": "src/index.cjs",
+  "bin": {
+    "lo": "bin/note.cjs"
+  },
+  "scripts": {
+    "start": "node bin/note.cjs",
+    "dev": "nodemon bin/note.cjs",
+    "test": "jest --passWithNoTests",
+    "lint": "eslint src/**/*.cjs",
+    "format": "prettier --write src/**/*.cjs",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "notes",
+    "markdown",
+    "cli",
+    "knowledge-base"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "fs-extra": "^11.2.0",
+    "fuse.js": "^7.0.0",
+    "glob": "^10.3.10",
+    "gray-matter": "^4.0.3",
+    "inquirer": "^9.2.19",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
+    "eslint": "^8.57.0",
+    "husky": "^9.1.7",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "prettier": "^3.2.5"
+  }
+}
