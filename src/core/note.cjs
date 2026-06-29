@@ -32,7 +32,7 @@ class Note {
   }
   
   static async create(title, options = {}) {
-    const { tags = [], template = 'default' } = options;
+    const { tags = [], template = 'default', category = null } = options;
     
     const frontmatter = {
       ...config.frontmatter.defaults,
@@ -41,6 +41,10 @@ class Note {
       tags: tags,
       status: 'draft'
     };
+    
+    if (category) {
+      frontmatter.category = category;
+    }
     
     const templateContent = await this.loadTemplate(template);
     const content = templateContent.replace('{{title}}', title);
@@ -93,6 +97,16 @@ class Note {
     }
   }
   
+  setCategory(category) {
+    this.data.category = category;
+    this.save();
+  }
+  
+  removeCategory() {
+    delete this.data.category;
+    this.save();
+  }
+  
   async save() {
     const content = matter.stringify(this.content, this.data);
     await FileUtils.write(this.filePath, content);
@@ -103,6 +117,7 @@ class Note {
       path: this.filePath,
       title: this.data.title,
       created: this.data.created,
+      category: this.data.category || null,
       tags: this.data.tags || [],
       status: this.data.status || 'draft',
       wordCount: StringUtils.countWords(this.content),

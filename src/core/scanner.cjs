@@ -13,6 +13,7 @@ class Scanner {
     const {
       status = null,
       tag = null,
+      category = null,
       limit = null
     } = options;
 
@@ -44,6 +45,12 @@ class Scanner {
     if (tag) {
       notes = notes.filter(note =>
         note.data.tags && note.data.tags.includes(tag)
+      );
+    }
+
+    if (category) {
+      notes = notes.filter(note =>
+        note.data.category === category
       );
     }
 

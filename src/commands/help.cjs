@@ -23,13 +23,13 @@ ${chalk.bold.yellow('命令列表:')}
 
   ${chalk.green('lo init')}                        初始化知识库（创建 docs/）
   ${chalk.green('lo new <title>')}                 创建新笔记
-  ${chalk.green('lo list')}                       列出所有笔记
+  ${chalk.green('lo list')}                       列出所有笔记（支持 --category）
   ${chalk.green('lo show <file>')}                 查看笔记内容
   ${chalk.green('lo edit <file>')}                 编辑笔记
   ${chalk.green('lo delete <file>')}               删除笔记
   ${chalk.green('lo index')}                      生成索引
-  ${chalk.green('lo tag <add|rm> <file> <tag>')}   管理标签
-  ${chalk.green('lo find <query>')}                搜索笔记
+  ${chalk.green('lo tag <add|rm|category> <file> [tag]')}  管理标签与分类
+  ${chalk.green('lo find <query>')}                搜索笔记（支持按分类搜索）
   ${chalk.green('lo stats')}                      显示统计信息
   ${chalk.green('lo link <from> <to>')}            建立双向链接
   ${chalk.green('lo move <file> <dest>')}          移动笔记
@@ -51,17 +51,21 @@ ${chalk.bold.yellow('快速开始:')}
   lo config add projects Projects    # 创建 docs/Projects/ 子目录
   lo config list                     # 查看当前分类
 
-  ${chalk.gray('# 4. 指定分类创建笔记')}
-  lo new "技术文章" --category blog  # 存入 docs/Blog/
+  ${chalk.gray('# 4. 指定分类创建笔记（自动写入 frontmatter）')}
+  lo new "技术文章" --category blog  # 存入 docs/Blog/，分类 = blog
+
+  ${chalk.gray('# 5. 给已有笔记设置分类')}
+  lo tag category docs/xxxx.md blog
+  lo tag category docs/xxxx.md       # 不传分类名即移除分类
 
 ${chalk.bold.yellow('常用选项:')}
 
   --tags      标签，逗号分隔（用于 new）
   --status    按状态过滤: draft / published / archived
-  --tag       按标签过滤（用于 list）
+  --tag       按标签过滤（用于 list / find）
+  --category  指定分类（new 写入 frontmatter；list / find 过滤）
   --limit     限制显示数量
   --format    输出格式: table / json / list（用于 list）
-  --category  指定分类目录（存放在 docs/<分类>/ 下）
   --force     跳过确认（用于 delete）
 
 ${chalk.bold.yellow('目录结构:')}
@@ -75,6 +79,7 @@ ${chalk.bold.yellow('笔记格式 (YAML Frontmatter):')}
   ---
   title: 笔记标题
   created: '2026-06-29'
+  category: blog       # 可选，笔记分类
   tags:
     - js
     - 前端

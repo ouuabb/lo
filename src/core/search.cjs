@@ -47,6 +47,13 @@ class SearchEngine {
       .map(note => note.toJSON());
   }
   
+  searchByCategory(category) {
+    const notes = this.scanner.scan({ includeArchived: true });
+    return notes
+      .filter(note => note.data.category === category)
+      .map(note => note.toJSON());
+  }
+  
   searchByDateRange(startDate, endDate) {
     const notes = this.scanner.scan({ includeArchived: true });
     const start = new Date(startDate);

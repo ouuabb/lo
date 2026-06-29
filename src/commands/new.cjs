@@ -10,7 +10,8 @@ module.exports = async function newNote(argv) {
   try {
     const note = await Note.create(title, {
       tags: tags ? tags.split(',').map(t => t.trim()) : [],
-      template: template || 'default'
+      template: template || 'default',
+      category: category || null
     });
 
     // 如果指定了分类，移动到 docs/<subdir>/
@@ -29,7 +30,10 @@ module.exports = async function newNote(argv) {
     Logger.success(`✅ 笔记已创建: ${note.filePath}`);
     Logger.info('📝 标题:', note.data.title);
     Logger.info('🏷️ 标签:', note.data.tags.join(', ') || '(无)');
-    Logger.info('📂 位置:', note.filePath);
+    if (note.data.category) {
+      Logger.info('📂 分类:', note.data.category);
+    }
+    Logger.info('📍 位置:', note.filePath);
     Logger.info('💡 编辑: lo edit ' + note.filePath);
 
   } catch (error) {

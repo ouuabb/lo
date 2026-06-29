@@ -3,7 +3,7 @@ const Logger = require('../utils/logger.cjs');
 const SearchEngine = require('../core/search.cjs');
 
 module.exports = function find(argv) {
-  const { query, limit, type } = argv;
+  const { query, limit, type, category } = argv;
   
   try {
     const search = new SearchEngine();
@@ -11,8 +11,15 @@ module.exports = function find(argv) {
     
     if (type === 'tag') {
       results = search.searchByTag(query);
+    } else if (type === 'category') {
+      results = search.searchByCategory(query);
     } else {
       results = search.search(query, { limit: limit || 10 });
+    }
+    
+    // 按分类过滤
+    if (category) {
+      results = results.filter(r => r.category === category);
     }
     
     if (results.length === 0) {
@@ -25,6 +32,9 @@ module.exports = function find(argv) {
       console.log(`${index + 1}. ${chalk.bold(result.title)}`);
       console.log(`   ${chalk.gray(result.path)}`);
       console.log(`   创建时间: ${result.created}`);
+      if (result.category) {
+        console.log(`   分类: ${chalk.magenta(result.category)}`);
+      }
       if (result.tags && result.tags.length > 0) {
         console.log(`   标签: ${result.tags.map(t => `#${t}`).join(' ')}`);
       }

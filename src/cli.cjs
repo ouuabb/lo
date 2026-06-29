@@ -68,6 +68,10 @@ cli
         type: 'string',
         description: '按标签过滤'
       })
+      .option('category', {
+        type: 'string',
+        description: '按分类过滤'
+      })
       .option('limit', {
         type: 'number',
         description: '限制数量',
@@ -108,11 +112,11 @@ cli
 
   .command('index', '生成索引README', {}, index)
 
-  .command('tag <action> <file> <tag>', '管理标签', (yargs) => {
+  .command('tag <action> <file> [tag]', '管理标签与分类', (yargs) => {
     yargs
       .positional('action', {
         type: 'string',
-        choices: ['add', 'rm']
+        choices: ['add', 'rm', 'category']
       });
   }, tag)
 
@@ -126,8 +130,12 @@ cli
       .option('type', {
         type: 'string',
         description: '搜索类型',
-        choices: ['full', 'title', 'tag'],
+        choices: ['full', 'title', 'tag', 'category'],
         default: 'full'
+      })
+      .option('category', {
+        type: 'string',
+        description: '按分类过滤搜索结果'
       });
   }, find)
 
