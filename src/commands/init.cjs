@@ -39,8 +39,8 @@ module.exports = async function init(argv) {
     const gitignorePath = path.join(targetPath, '.gitignore');
     await fs.writeFile(gitignorePath, `.note/\nnode_modules/\nbackups/\n.DS_Store\n`);
 
-    Logger.success(`✅ 知识库初始化完成: ${targetPath}`);
-    Logger.info(`📂 笔记根目录: ${config.ROOT_DIR}/`);
+    Logger.success(`知识库初始化完成: ${targetPath}`);
+    Logger.info(`笔记根目录: ${config.ROOT_DIR}/`);
     Logger.info('接下来你可以:');
     Logger.info('  lo new "我的第一篇笔记"');
     Logger.info('  lo config add blog Blog           添加子分类');

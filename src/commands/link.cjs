@@ -22,7 +22,7 @@ module.exports = async function link(argv) {
     if (!fromNote.content.includes(`[[${toNote.data.title}]]`)) {
       fromNote.content += `\n\n[[${toNote.data.title}]]`;
       await fromNote.save();
-      Logger.success(`✅ 已在 "${fromNote.data.title}" 中添加链接到 "${toNote.data.title}"`);
+      Logger.success(`已在 "${fromNote.data.title}" 中添加链接到 "${toNote.data.title}"`);
     } else {
       Logger.info('链接已存在');
     }
@@ -30,7 +30,7 @@ module.exports = async function link(argv) {
     if (!toNote.content.includes(`[[${fromNote.data.title}]]`)) {
       toNote.content += `\n\n[[${fromNote.data.title}]]`;
       await toNote.save();
-      Logger.success(`✅ 已在 "${toNote.data.title}" 中添加链接到 "${fromNote.data.title}"`);
+      Logger.success(`已在 "${toNote.data.title}" 中添加链接到 "${fromNote.data.title}"`);
     } else {
       Logger.info('反向链接已存在');
     }

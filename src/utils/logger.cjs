@@ -2,19 +2,19 @@ const chalk = require('chalk');
 
 class Logger {
   static info(msg) {
-    console.log(chalk.blue('ℹ') + ' ' + msg);
+    console.log(chalk.blue('[info]') + ' ' + msg);
   }
   
   static success(msg) {
-    console.log(chalk.green('✓') + ' ' + msg);
+    console.log(chalk.green('[ok]') + ' ' + msg);
   }
   
   static warn(msg) {
-    console.log(chalk.yellow('⚠') + ' ' + msg);
+    console.log(chalk.yellow('[warn]') + ' ' + msg);
   }
   
   static error(msg) {
-    console.log(chalk.red('✗') + ' ' + msg);
+    console.log(chalk.red('[err]') + ' ' + msg);
   }
   
   static table(data) {
@@ -23,7 +23,7 @@ class Logger {
   
   static title(msg) {
     console.log('\n' + chalk.bold.cyan(msg));
-    console.log(chalk.gray('━'.repeat(msg.length + 4)));
+    console.log(chalk.gray('-'.repeat(msg.length + 4)));
   }
 }
 

@@ -27,14 +27,14 @@ module.exports = async function newNote(argv) {
       }
     }
 
-    Logger.success(`✅ 笔记已创建: ${note.filePath}`);
-    Logger.info('📝 标题:', note.data.title);
-    Logger.info('🏷️ 标签:', note.data.tags.join(', ') || '(无)');
+    Logger.success(`笔记已创建: ${note.filePath}`);
+    Logger.info('标题:', note.data.title);
+    Logger.info('标签:', note.data.tags.join(', ') || '(无)');
     if (note.data.category) {
-      Logger.info('📂 分类:', note.data.category);
+      Logger.info('分类:', note.data.category);
     }
-    Logger.info('📍 位置:', note.filePath);
-    Logger.info('💡 编辑: lo edit ' + note.filePath);
+    Logger.info('位置:', note.filePath);
+    Logger.info('编辑: lo edit ' + note.filePath);
 
   } catch (error) {
     Logger.error(`创建失败: ${error.message}`);

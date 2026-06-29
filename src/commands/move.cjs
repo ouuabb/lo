@@ -34,7 +34,7 @@ module.exports = async function move(argv) {
     // 确保目标目录存在
     await fs.ensureDir(path.dirname(targetPath));
     await FileUtils.move(file, targetPath);
-    Logger.success(`✅ 已移动笔记到: ${targetPath}`);
+    Logger.success(`已移动笔记到: ${targetPath}`);
 
   } catch (error) {
     Logger.error(`移动笔记失败: ${error.message}`);

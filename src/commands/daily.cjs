@@ -12,9 +12,9 @@ module.exports = async function daily() {
       template: 'daily'
     });
     
-    Logger.success(`✅ 今日日记已创建: ${note.filePath}`);
-    Logger.info('📝 日期:', date);
-    Logger.info('💡 编辑: lo edit ' + note.filePath);
+    Logger.success(`今日日记已创建: ${note.filePath}`);
+    Logger.info('日期:', date);
+    Logger.info('编辑: lo edit ' + note.filePath);
     
   } catch (error) {
     Logger.error(`创建日记失败: ${error.message}`);

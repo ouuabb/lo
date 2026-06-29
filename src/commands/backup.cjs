@@ -24,7 +24,7 @@ module.exports = async function backup(argv) {
       }
     }
 
-    Logger.success(`✅ 备份完成: ${backupPath}`);
+    Logger.success(`备份完成: ${backupPath}`);
 
   } catch (error) {
     Logger.error(`备份失败: ${error.message}`);

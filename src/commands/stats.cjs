@@ -12,14 +12,14 @@ module.exports = function stats(argv) {
     
     Logger.title('知识库统计');
     
-    console.log(chalk.blue('📝 笔记统计:'));
+    console.log(chalk.blue('笔记统计:'));
     console.log(`   总笔记数: ${stats.total}`);
     console.log(`   活跃笔记: ${stats.active}`);
     
-    console.log('\n' + chalk.blue('✏️ 内容统计:'));
+    console.log('\n' + chalk.blue('内容统计:'));
     console.log(`   总字数: ${stats.totalWords}`);
     
-    console.log('\n' + chalk.blue('🏷️ 标签统计:'));
+    console.log('\n' + chalk.blue('标签统计:'));
     console.log(`   总标签数: ${Object.keys(stats.tags).length}`);
     const topTags = Object.entries(stats.tags)
       .sort((a, b) => b[1] - a[1])
@@ -28,7 +28,7 @@ module.exports = function stats(argv) {
       console.log(`   #${tag}: ${count} 篇`);
     });
     
-    console.log('\n' + chalk.blue('📊 状态统计:'));
+    console.log('\n' + chalk.blue('状态统计:'));
     Object.entries(stats.statuses).forEach(([status, count]) => {
       console.log(`   ${status}: ${count} 篇`);
     });

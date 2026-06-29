@@ -32,7 +32,7 @@ module.exports = async function deleteNote(argv) {
     }
     
     await fs.remove(file);
-    Logger.success(`✅ 已删除笔记: ${file}`);
+    Logger.success(`已删除笔记: ${file}`);
     
   } catch (error) {
     Logger.error(`删除笔记失败: ${error.message}`);
