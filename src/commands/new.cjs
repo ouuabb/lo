@@ -1,40 +1,58 @@
 const path = require('path');
-const Note = require('../core/note.cjs');
 const Logger = require('../utils/logger.cjs');
-const FileUtils = require('../utils/file.cjs');
-const config = require('../config/default.cjs');
+const Repository = require('../repo/repository.cjs');
+const StringUtils = require('../utils/string.cjs');
+const DateUtils = require('../utils/date.cjs');
 
-module.exports = async function newNote(argv) {
-  const { title, tags, template, category } = argv;
+module.exports = async function newResource(argv) {
+  const { title, type = 'note', tags, template, category } = argv;
 
   try {
-    const note = await Note.create(title, {
+    const repo = new Repository(process.cwd());
+    await repo.open();
+
+    const slug = StringUtils.slugify(title);
+    const date = DateUtils.today();
+    const filename = `${date}-${slug}.md`;
+
+    const frontmatter = {
+      title: title,
+      created: date,
       tags: tags ? tags.split(',').map(t => t.trim()) : [],
-      template: template || 'default',
-      category: category || null
+      status: 'draft'
+    };
+
+    if (category) {
+      frontmatter.category = category;
+    }
+
+    const content = `---\n${Object.entries(frontmatter).map(([k, v]) => 
+      typeof v === 'string' ? `${k}: ${v}` : `${k}: ${JSON.stringify(v)}`
+    ).join('\n')}\n---\n\n# ${title}\n\n开始写作...\n`;
+
+    const metadata = {
+      title: title,
+      tags: frontmatter.tags,
+      category: category || null,
+      status: 'draft'
+    };
+
+    const resource = await repo.createResource(type, content, {
+      filename,
+      metadata
     });
 
-    // 如果指定了分类，移动到 docs/<subdir>/
+    Logger.success(`资源已创建: ${resource.rid}`);
+    Logger.info('标题:', title);
+    Logger.info('类型:', type);
+    Logger.info('标签:', frontmatter.tags.join(', ') || '(无)');
     if (category) {
-      const targetDir = config.getCategoryDir(category);
-      if (!targetDir) {
-        Logger.warn(`分类 "${category}" 不存在（用 lo config list 查看可用分类）`);
-      } else if (targetDir !== config.getDefaultDir()) {
-        const filename = Note.generateFilename(title);
-        const targetPath = path.join(targetDir, filename);
-        await FileUtils.move(note.filePath, targetPath);
-        note.filePath = targetPath;
-      }
+      Logger.info('分类:', category);
     }
+    Logger.info('位置:', resource.path);
+    Logger.info('编辑: lo edit ' + resource.rid);
 
-    Logger.success(`笔记已创建: ${note.filePath}`);
-    Logger.info('标题:', note.data.title);
-    Logger.info('标签:', note.data.tags.join(', ') || '(无)');
-    if (note.data.category) {
-      Logger.info('分类:', note.data.category);
-    }
-    Logger.info('位置:', note.filePath);
-    Logger.info('编辑: lo edit ' + note.filePath);
+    await repo.close();
 
   } catch (error) {
     Logger.error(`创建失败: ${error.message}`);

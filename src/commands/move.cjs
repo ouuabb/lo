@@ -1,43 +1,41 @@
-const fs = require('fs-extra');
 const path = require('path');
 const Logger = require('../utils/logger.cjs');
-const FileUtils = require('../utils/file.cjs');
-const Note = require('../core/note.cjs');
-const config = require('../config/default.cjs');
+const Repository = require('../repo/repository.cjs');
 
 module.exports = async function move(argv) {
-  const { file, dest, category } = argv;
-
+  const { rid, dest } = argv;
+  
   try {
-    if (!fs.existsSync(file)) {
-      Logger.error(`文件不存在: ${file}`);
-      process.exit(1);
-    }
+    const repo = new Repository(process.cwd());
+    await repo.open();
 
-    let targetPath;
-
-    if (category) {
-      const targetDir = config.getCategoryDir(category);
-      if (!targetDir) {
-        Logger.error(`无效的分类: ${category}`);
-        process.exit(1);
-      }
-      const filename = path.basename(file);
-      targetPath = path.join(targetDir, filename);
-    } else if (dest) {
-      targetPath = dest;
+    let resource;
+    
+    if (rid.startsWith('res_')) {
+      resource = await repo.getResource(rid);
     } else {
-      Logger.error('请指定目标路径或分类');
+      resource = await repo.getResourceByPath(rid);
+      if (!resource) {
+        resource = await repo.getResourceByPath(process.cwd() + '/' + rid);
+      }
+    }
+    
+    if (!resource) {
+      Logger.error(`资源不存在: ${rid}`);
       process.exit(1);
     }
 
-    // 确保目标目录存在
-    await fs.ensureDir(path.dirname(targetPath));
-    await FileUtils.move(file, targetPath);
-    Logger.success(`已移动笔记到: ${targetPath}`);
-
+    const targetPath = path.isAbsolute(dest) ? dest : path.join(process.cwd(), dest);
+    
+    await repo.moveResource(resource.rid, targetPath);
+    
+    Logger.success(`资源已移动: ${resource.metadata.title || '未命名资源'}`);
+    Logger.info(`新位置: ${targetPath}`);
+    
+    await repo.close();
+    
   } catch (error) {
-    Logger.error(`移动笔记失败: ${error.message}`);
+    Logger.error(`移动资源失败: ${error.message}`);
     process.exit(1);
   }
 };

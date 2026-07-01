@@ -1,39 +1,49 @@
-const fs = require('fs-extra');
 const Logger = require('../utils/logger.cjs');
-const Note = require('../core/note.cjs');
+const Repository = require('../repo/repository.cjs');
 
 module.exports = async function link(argv) {
-  const { from, to } = argv;
+  const { from, to, type = 'reference' } = argv;
   
   try {
-    if (!fs.existsSync(from)) {
-      Logger.error(`源文件不存在: ${from}`);
+    const repo = new Repository(process.cwd());
+    await repo.open();
+
+    let resourceA, resourceB;
+
+    if (from.startsWith('res_')) {
+      resourceA = await repo.getResource(from);
+    } else {
+      resourceA = await repo.getResourceByPath(from);
+      if (!resourceA) {
+        resourceA = await repo.getResourceByPath(process.cwd() + '/' + from);
+      }
+    }
+
+    if (to.startsWith('res_')) {
+      resourceB = await repo.getResource(to);
+    } else {
+      resourceB = await repo.getResourceByPath(to);
+      if (!resourceB) {
+        resourceB = await repo.getResourceByPath(process.cwd() + '/' + to);
+      }
+    }
+
+    if (!resourceA) {
+      Logger.error(`源资源不存在: ${from}`);
       process.exit(1);
     }
     
-    if (!fs.existsSync(to)) {
-      Logger.error(`目标文件不存在: ${to}`);
+    if (!resourceB) {
+      Logger.error(`目标资源不存在: ${to}`);
       process.exit(1);
     }
     
-    const fromNote = Note.fromFile(from);
-    const toNote = Note.fromFile(to);
+    await repo.linkResources(resourceA.rid, resourceB.rid, type);
     
-    if (!fromNote.content.includes(`[[${toNote.data.title}]]`)) {
-      fromNote.content += `\n\n[[${toNote.data.title}]]`;
-      await fromNote.save();
-      Logger.success(`已在 "${fromNote.data.title}" 中添加链接到 "${toNote.data.title}"`);
-    } else {
-      Logger.info('链接已存在');
-    }
+    Logger.success(`已建立链接: ${resourceA.metadata.title} ↔ ${resourceB.metadata.title}`);
+    Logger.info(`链接类型: ${type}`);
     
-    if (!toNote.content.includes(`[[${fromNote.data.title}]]`)) {
-      toNote.content += `\n\n[[${fromNote.data.title}]]`;
-      await toNote.save();
-      Logger.success(`已在 "${toNote.data.title}" 中添加链接到 "${fromNote.data.title}"`);
-    } else {
-      Logger.info('反向链接已存在');
-    }
+    await repo.close();
     
   } catch (error) {
     Logger.error(`建立链接失败: ${error.message}`);

@@ -1,36 +1,74 @@
-const fs = require('fs-extra');
 const Logger = require('../utils/logger.cjs');
-const Note = require('../core/note.cjs');
+const Repository = require('../repo/repository.cjs');
 
 module.exports = async function tag(argv) {
-  const { action, file, tag } = argv;
+  const { action, rid, tag } = argv;
   
   try {
-    if (!fs.existsSync(file)) {
-      Logger.error(`文件不存在: ${file}`);
-      process.exit(1);
-    }
+    const repo = new Repository(process.cwd());
+    await repo.open();
+
+    let resource;
     
-    const note = Note.fromFile(file);
-    
-    if (action === 'add') {
-      note.addTag(tag);
-      Logger.success(`已添加标签 "#${tag}" 到 "${note.data.title}"`);
-    } else if (action === 'rm') {
-      note.removeTag(tag);
-      Logger.success(`已移除标签 "#${tag}" 从 "${note.data.title}"`);
-    } else if (action === 'category') {
-      if (!tag) {
-        note.removeCategory();
-        Logger.success(`已移除分类 从 "${note.data.title}"`);
-      } else {
-        note.setCategory(tag);
-        Logger.success(`已设置分类 "${tag}" 到 "${note.data.title}"`);
-      }
+    if (rid.startsWith('res_')) {
+      resource = await repo.getResource(rid);
     } else {
-      Logger.error('无效的操作，使用 add / rm / category');
+      resource = await repo.getResourceByPath(rid);
+      if (!resource) {
+        resource = await repo.getResourceByPath(process.cwd() + '/' + rid);
+      }
+    }
+    
+    if (!resource) {
+      Logger.error(`资源不存在: ${rid}`);
       process.exit(1);
     }
+
+    const currentTags = resource.metadata.tags || [];
+    let updatedTags;
+
+    switch (action) {
+      case 'add':
+        if (!tag) {
+          Logger.error('请指定标签名称');
+          process.exit(1);
+        }
+        if (currentTags.includes(tag)) {
+          Logger.info(`标签 "${tag}" 已存在`);
+        } else {
+          updatedTags = [...currentTags, tag];
+          await repo.updateResource(resource.rid, {
+            metadata: { ...resource.metadata, tags: updatedTags }
+          });
+          Logger.success(`已添加标签: ${tag}`);
+        }
+        break;
+        
+      case 'rm':
+        if (!tag) {
+          Logger.error('请指定标签名称');
+          process.exit(1);
+        }
+        updatedTags = currentTags.filter(t => t !== tag);
+        await repo.updateResource(resource.rid, {
+          metadata: { ...resource.metadata, tags: updatedTags }
+        });
+        Logger.success(`已移除标签: ${tag}`);
+        break;
+        
+      case 'list':
+        Logger.title(`资源 "${resource.metadata.title || '未命名'}" 的标签`);
+        if (currentTags.length === 0) {
+          Logger.info('暂无标签');
+        } else {
+          currentTags.forEach((t, i) => {
+            console.log(`${i + 1}. ${t}`);
+          });
+        }
+        break;
+    }
+    
+    await repo.close();
     
   } catch (error) {
     Logger.error(`标签操作失败: ${error.message}`);

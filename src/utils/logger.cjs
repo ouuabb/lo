@@ -1,20 +1,20 @@
 const chalk = require('chalk');
 
 class Logger {
-  static info(msg) {
-    console.log(chalk.blue('[info]') + ' ' + msg);
+  static info(msg, ...args) {
+    console.log(chalk.blue('[info]') + ' ' + msg, ...args);
   }
   
-  static success(msg) {
-    console.log(chalk.green('[ok]') + ' ' + msg);
+  static success(msg, ...args) {
+    console.log(chalk.green('[ok]') + ' ' + msg, ...args);
   }
   
-  static warn(msg) {
-    console.log(chalk.yellow('[warn]') + ' ' + msg);
+  static warn(msg, ...args) {
+    console.log(chalk.yellow('[warn]') + ' ' + msg, ...args);
   }
   
-  static error(msg) {
-    console.log(chalk.red('[err]') + ' ' + msg);
+  static error(msg, ...args) {
+    console.log(chalk.red('[err]') + ' ' + msg, ...args);
   }
   
   static table(data) {

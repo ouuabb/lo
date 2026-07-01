@@ -1,50 +1,56 @@
 const chalk = require('chalk');
-const Scanner = require('../core/scanner.cjs');
 const Logger = require('../utils/logger.cjs');
+const Repository = require('../repo/repository.cjs');
 
-module.exports = function list(argv) {
-  const { status, tag, category, limit, format } = argv;
+module.exports = async function list(argv) {
+  const { type, status, tag, category, limit, format } = argv;
   
   try {
-    const scanner = new Scanner();
-    const notes = scanner.scan({
-      status: status || null,
-      tag: tag || null,
-      category: category || null,
-      limit: limit || 20
-    });
+    const repo = new Repository(process.cwd());
+    await repo.open();
+
+    const options = {};
+    if (type) options.type = type;
+    if (limit) options.limit = limit;
+
+    const resources = await repo.query(options);
     
-    if (notes.length === 0) {
-      Logger.info('暂无笔记');
+    await repo.close();
+
+    if (resources.length === 0) {
+      Logger.info('暂无资源');
       return;
     }
     
     if (format === 'json') {
-      console.log(JSON.stringify(notes.map(n => n.toJSON()), null, 2));
+      console.log(JSON.stringify(resources, null, 2));
       return;
     }
     
     if (format === 'list') {
-      notes.forEach((note, index) => {
-        const tags = note.data.tags ? note.data.tags.map(t => `#${t}`).join(' ') : '';
-        const cat = note.data.category ? chalk.magenta(`[${note.data.category}] `) : '';
-        console.log(`${index + 1}. ${cat}${note.data.title} ${chalk.gray(note.data.created)} ${tags}`);
+      resources.forEach((resource, index) => {
+        const title = resource.metadata.title || '未命名';
+        const tags = resource.metadata.tags ? resource.metadata.tags.map(t => `#${t}`).join(' ') : '';
+        const cat = resource.metadata.category ? chalk.magenta(`[${resource.metadata.category}] `) : '';
+        const created = new Date(resource.created).toLocaleDateString();
+        console.log(`${index + 1}. ${cat}${title} ${chalk.gray(created)} ${tags}`);
       });
       return;
     }
     
-    Logger.title('笔记列表');
-    const tableData = notes.map(note => ({
-      标题: note.data.title,
-      创建时间: note.data.created,
-      分类: note.data.category || '-',
-      状态: note.data.status || 'draft',
-      标签: (note.data.tags || []).join(', ') || '-'
+    Logger.title('资源列表');
+    const tableData = resources.map(resource => ({
+      RID: resource.rid.substring(0, 12) + '...',
+      标题: resource.metadata.title || '未命名',
+      类型: resource.type,
+      创建时间: new Date(resource.created).toLocaleString(),
+      分类: resource.metadata.category || '-',
+      标签: (resource.metadata.tags || []).join(', ') || '-'
     }));
     Logger.table(tableData);
     
   } catch (error) {
-    Logger.error(`获取笔记列表失败: ${error.message}`);
+    Logger.error(`获取资源列表失败: ${error.message}`);
     process.exit(1);
   }
 };

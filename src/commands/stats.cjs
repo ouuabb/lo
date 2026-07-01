@@ -1,38 +1,32 @@
 const chalk = require('chalk');
 const Logger = require('../utils/logger.cjs');
-const Scanner = require('../core/scanner.cjs');
-const DateUtils = require('../utils/date.cjs');
+const Repository = require('../repo/repository.cjs');
 
-module.exports = function stats(argv) {
+module.exports = async function stats(argv) {
   const { today, week } = argv;
   
   try {
-    const scanner = new Scanner();
-    const stats = scanner.getStats();
+    const repo = new Repository(process.cwd());
+    await repo.open();
+
+    const stats = await repo.getStats();
     
-    Logger.title('知识库统计');
+    await repo.close();
+
+    Logger.title('资源仓库统计');
     
-    console.log(chalk.blue('笔记统计:'));
-    console.log(`   总笔记数: ${stats.total}`);
-    console.log(`   活跃笔记: ${stats.active}`);
+    console.log(chalk.bold('资源总数:'), stats.totalResources);
+    console.log(chalk.bold('关系总数:'), stats.totalRelations);
     
-    console.log('\n' + chalk.blue('内容统计:'));
-    console.log(`   总字数: ${stats.totalWords}`);
-    
-    console.log('\n' + chalk.blue('标签统计:'));
-    console.log(`   总标签数: ${Object.keys(stats.tags).length}`);
-    const topTags = Object.entries(stats.tags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-    topTags.forEach(([tag, count]) => {
-      console.log(`   #${tag}: ${count} 篇`);
+    console.log('\n' + chalk.bold('按类型分布:'));
+    stats.resourcesByType.forEach(item => {
+      console.log(`  - ${item.type}: ${item.count} 个`);
     });
     
-    console.log('\n' + chalk.blue('状态统计:'));
-    Object.entries(stats.statuses).forEach(([status, count]) => {
-      console.log(`   ${status}: ${count} 篇`);
-    });
-    
+    if (stats.latestActivity) {
+      console.log('\n' + chalk.bold('最近活动:'), new Date(stats.latestActivity).toLocaleString());
+    }
+
   } catch (error) {
     Logger.error(`获取统计信息失败: ${error.message}`);
     process.exit(1);

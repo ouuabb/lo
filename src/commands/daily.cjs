@@ -1,21 +1,58 @@
-const Note = require('../core/note.cjs');
 const Logger = require('../utils/logger.cjs');
+const Repository = require('../repo/repository.cjs');
 const DateUtils = require('../utils/date.cjs');
 
-module.exports = async function daily() {
+module.exports = async function daily(argv) {
   try {
-    const date = DateUtils.today();
-    const title = `${date} 日记`;
-    
-    const note = await Note.create(title, {
-      tags: ['日记', date.substring(0, 7)],
-      template: 'daily'
+    const repo = new Repository(process.cwd());
+    await repo.open();
+
+    const today = DateUtils.today();
+    const dateStr = new Date().toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'long'
     });
-    
-    Logger.success(`今日日记已创建: ${note.filePath}`);
-    Logger.info('日期:', date);
-    Logger.info('编辑: lo edit ' + note.filePath);
-    
+
+    const content = `---
+title: ${dateStr} 日记
+created: ${today}
+tags: ["daily"]
+status: draft
+---
+
+# ${dateStr}
+
+## 今日完成
+
+- 
+
+## 待办事项
+
+- [ ] 
+
+## 想法记录
+
+`;
+
+    const metadata = {
+      title: `${dateStr} 日记`,
+      tags: ['daily'],
+      status: 'draft'
+    };
+
+    const resource = await repo.createResource('note', content, {
+      filename: `${today}-daily.md`,
+      metadata
+    });
+
+    Logger.success(`今日日记已创建: ${resource.rid}`);
+    Logger.info('位置:', resource.path);
+    Logger.info('编辑: lo edit ' + resource.rid);
+
+    await repo.close();
+
   } catch (error) {
     Logger.error(`创建日记失败: ${error.message}`);
     process.exit(1);

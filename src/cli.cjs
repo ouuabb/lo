@@ -5,11 +5,11 @@ const chalk = require('chalk');
 const packageJson = require('../package.json');
 
 const init = require('./commands/init.cjs');
-const newNote = require('./commands/new.cjs');
+const newResource = require('./commands/new.cjs');
 const list = require('./commands/list.cjs');
 const show = require('./commands/show.cjs');
 const edit = require('./commands/edit.cjs');
-const deleteNote = require('./commands/delete.cjs');
+const deleteResource = require('./commands/delete.cjs');
 const index = require('./commands/index.cjs');
 const tag = require('./commands/tag.cjs');
 const find = require('./commands/find.cjs');
@@ -20,20 +20,23 @@ const backup = require('./commands/backup.cjs');
 const daily = require('./commands/daily.cjs');
 const configCmd = require('./commands/config.cjs');
 const help = require('./commands/help.cjs');
+const importCmd = require('./commands/import.cjs');
+const sync = require('./commands/sync.cjs');
+const manual = require('./commands/manual.cjs');
 
 const cli = yargs
   .scriptName('lo')
   .version(packageJson.version)
   .usage('$0 <command> [options]')
-  .example('$0 new "理解闭包" --tags js,面试', '创建新笔记')
-  .example('$0 list --status published', '列出所有已发布笔记')
-  .example('$0 find "分布式"', '搜索笔记')
+  .example('$0 new "理解闭包" --type note', '创建新资源')
+  .example('$0 list --type image', '列出所有图片资源')
+  .example('$0 find "分布式"', '搜索资源')
   .help()
   .alias('h', 'help')
   .alias('v', 'version');
 
 cli
-  .command('init', '初始化知识库', (yargs) => {
+  .command('init', '初始化资源仓库', (yargs) => {
     yargs.option('path', {
       type: 'string',
       description: '初始化路径',
@@ -41,8 +44,30 @@ cli
     });
   }, init)
 
-  .command('new <title>', '创建新笔记', (yargs) => {
+  .command('import <path>', '导入资源', (yargs) => {
     yargs
+      .positional('path', {
+        type: 'string',
+        description: '文件或目录路径'
+      })
+      .option('type', {
+        type: 'string',
+        description: '资源类型 (note, image, pdf, etc.)'
+      });
+  }, importCmd)
+
+  .command('new <title>', '创建新资源', (yargs) => {
+    yargs
+      .positional('title', {
+        type: 'string',
+        description: '资源标题'
+      })
+      .option('type', {
+        type: 'string',
+        description: '资源类型',
+        default: 'note',
+        choices: ['note', 'pdf', 'image', 'video', 'audio', 'html', 'text']
+      })
       .option('tags', {
         type: 'string',
         description: '标签，逗号分隔'
@@ -53,12 +78,16 @@ cli
       })
       .option('category', {
         type: 'string',
-        description: '分类目录（用 lo config list 查看可用分类）'
+        description: '分类目录'
       });
-  }, newNote)
+  }, newResource)
 
-  .command('list', '列出所有笔记', (yargs) => {
+  .command('list', '列出所有资源', (yargs) => {
     yargs
+      .option('type', {
+        type: 'string',
+        description: '按类型过滤 (note, image, pdf, etc.)'
+      })
       .option('status', {
         type: 'string',
         description: '按状态过滤',
@@ -85,43 +114,68 @@ cli
       });
   }, list)
 
-  .command('show <file>', '查看笔记内容', (yargs) => {
+  .command('show <rid>', '查看资源', (yargs) => {
     yargs
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID 或文件路径'
+      })
       .option('raw', {
         type: 'boolean',
-        description: '显示原始Markdown',
+        description: '显示原始内容',
         default: false
       });
   }, show)
 
-  .command('edit <file>', '编辑笔记', (yargs) => {
+  .command('edit <rid>', '编辑资源', (yargs) => {
     yargs
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID 或文件路径'
+      })
       .option('editor', {
         type: 'string',
         description: '指定编辑器'
       });
   }, edit)
 
-  .command('delete <file>', '删除笔记', (yargs) => {
+  .command('delete <rid>', '删除资源', (yargs) => {
     yargs
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID 或文件路径'
+      })
       .option('force', {
         type: 'boolean',
         description: '强制删除，不确认'
+      })
+      .option('hard', {
+        type: 'boolean',
+        description: '永久删除（不可恢复）',
+        default: false
       });
-  }, deleteNote)
+  }, deleteResource)
 
-  .command('index', '生成索引README', {}, index)
+  .command('index', '生成索引', {}, index)
 
-  .command('tag <action> <file> [tag]', '管理标签与分类', (yargs) => {
+  .command('tag <action> <rid> [tag]', '管理标签', (yargs) => {
     yargs
       .positional('action', {
         type: 'string',
-        choices: ['add', 'rm', 'category']
+        choices: ['add', 'rm', 'list']
+      })
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID 或文件路径'
       });
   }, tag)
 
-  .command('find <query>', '搜索笔记', (yargs) => {
+  .command('find <query>', '搜索资源', (yargs) => {
     yargs
+      .positional('query', {
+        type: 'string',
+        description: '搜索关键词'
+      })
       .option('limit', {
         type: 'number',
         description: '结果数量限制',
@@ -129,13 +183,7 @@ cli
       })
       .option('type', {
         type: 'string',
-        description: '搜索类型',
-        choices: ['full', 'title', 'tag', 'category'],
-        default: 'full'
-      })
-      .option('category', {
-        type: 'string',
-        description: '按分类过滤搜索结果'
+        description: '按类型过滤'
       });
   }, find)
 
@@ -151,17 +199,36 @@ cli
       });
   }, stats)
 
-  .command('link <from> <to>', '建立双向链接', {}, link)
-
-  .command('move <file> <dest>', '移动笔记', (yargs) => {
+  .command('link <from> <to>', '建立资源链接', (yargs) => {
     yargs
-      .option('category', {
+      .positional('from', {
         type: 'string',
-        description: '目标分类（用 lo config list 查看可用分类）'
+        description: '源资源 RID 或路径'
+      })
+      .positional('to', {
+        type: 'string',
+        description: '目标资源 RID 或路径'
+      })
+      .option('type', {
+        type: 'string',
+        description: '链接类型',
+        default: 'reference'
+      });
+  }, link)
+
+  .command('move <rid> <dest>', '移动资源', (yargs) => {
+    yargs
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID 或文件路径'
+      })
+      .positional('dest', {
+        type: 'string',
+        description: '目标路径'
       });
   }, move)
 
-  .command('backup', '备份知识库', (yargs) => {
+  .command('backup', '备份资源仓库', (yargs) => {
     yargs
       .option('dest', {
         type: 'string',
@@ -177,7 +244,7 @@ cli
 
   .command('daily', '创建今日日记', {}, daily)
 
-  .command('config <action> [key] [dir]', '管理分类目录', (yargs) => {
+  .command('config <action> [key] [dir]', '管理配置', (yargs) => {
     yargs
       .positional('action', {
         type: 'string',
@@ -186,13 +253,17 @@ cli
       })
       .positional('key', {
         type: 'string',
-        describe: '分类名称 (add/rm 时使用)'
+        describe: '配置键名'
       })
       .positional('dir', {
         type: 'string',
-        describe: '目录路径 (add 时使用)'
+        describe: '目录路径'
       });
-  }, configCmd);
+  }, configCmd)
+
+  .command('sync', '同步资源', {}, sync)
+
+  .command('manual', '查看完整手册', {}, manual);
 
 cli.fail((msg, err, yargs) => {
   if (err) {

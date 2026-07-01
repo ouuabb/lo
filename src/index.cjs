@@ -1,4 +1,10 @@
 module.exports = {
+  Repository: require('./repo/repository.cjs'),
+  Database: require('./repo/database.cjs'),
+  ResourceService: require('./repo/resourceService.cjs'),
+  RelationService: require('./repo/relationService.cjs'),
+  QueryEngine: require('./repo/queryEngine.cjs'),
+  FileWatcher: require('./repo/fileWatcher.cjs'),
   Note: require('./core/note.cjs'),
   Scanner: require('./core/scanner.cjs'),
   Indexer: require('./core/indexer.cjs'),
@@ -7,5 +13,8 @@ module.exports = {
   Logger: require('./utils/logger.cjs'),
   DateUtils: require('./utils/date.cjs'),
   StringUtils: require('./utils/string.cjs'),
-  FileUtils: require('./utils/file.cjs')
+  FileUtils: require('./utils/file.cjs'),
+  RidUtils: require('./utils/rid.cjs'),
+  HashUtils: require('./utils/hash.cjs'),
+  ResourceType: require('./utils/resourceType.cjs')
 };
