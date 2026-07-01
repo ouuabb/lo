@@ -3,6 +3,7 @@ const ResourceService = require('./resourceService.cjs');
 const RelationService = require('./relationService.cjs');
 const QueryEngine = require('./queryEngine.cjs');
 const FileWatcher = require('./fileWatcher.cjs');
+const StagingArea = require('./staging.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
 const path = require('path');
@@ -16,6 +17,7 @@ class Repository {
     this.relationService = null;
     this.queryEngine = null;
     this.watcher = null;
+    this.staging = new StagingArea(repoPath);
   }
 
   async init() {
@@ -144,22 +146,147 @@ class Repository {
     return this.queryEngine.getGraph(rid);
   }
 
-  async sync() {
-    const resources = await this.resourceService.getAll();
+  async getConfig(key, defaultValue) {
+    const row = await this.db.get(
+      'SELECT value FROM sync_config WHERE key = ?',
+      [key]
+    );
+    if (row) {
+      const value = row.value;
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+      if (!isNaN(value)) return Number(value);
+      return value;
+    }
+    return defaultValue;
+  }
+
+  async setConfig(key, value) {
+    const strValue = typeof value === 'boolean' ? value.toString() : String(value);
+    await this.db.run(
+      'INSERT OR REPLACE INTO sync_config (key, value) VALUES (?, ?)',
+      [key, strValue]
+    );
+    return value;
+  }
+
+  async getLastSyncTime() {
+    return await this.getConfig('lastSyncTime', 0);
+  }
+
+  async setLastSyncTime(timestamp) {
+    await this.setConfig('lastSyncTime', timestamp);
+  }
+
+  async logSync(action, path, details = '') {
+    await this.db.run(
+      'INSERT INTO sync_log (timestamp, action, path, details) VALUES (?, ?, ?, ?)',
+      [Date.now(), action, path, details]
+    );
+  }
+
+  async sync(options = {}) {
+    const { full = false, silent = false } = options;
     
-    for (const resource of resources) {
+    const result = {
+      added: [],
+      deleted: [],
+      updated: [],
+      skipped: [],
+      total: 0
+    };
+
+    const lastSyncTime = full ? 0 : await this.getLastSyncTime();
+    const currentTime = Date.now();
+
+    const files = glob.sync('resources/**/*', {
+      cwd: this.repoPath,
+      ignore: ['**/node_modules/**', '**/.git/**', '**/.repo/**'],
+      absolute: true,
+      nodir: true
+    });
+
+    for (const file of files) {
+      try {
+        if (!ResourceType.isSupported(file)) {
+          continue;
+        }
+
+        const stats = await fs.stat(file);
+        const mtime = stats.mtime.getTime();
+
+        if (!full && mtime < lastSyncTime) {
+          continue;
+        }
+
+        const existing = await this.resourceService.getByPath(file);
+        
+        if (!existing) {
+          const resource = await this.resourceService.importFile(file);
+          result.added.push({
+            path: file,
+            type: resource.type,
+            rid: resource.rid
+          });
+          await this.logSync('added', file, resource.type);
+        } else {
+          const rehashed = await this.resourceService.rehash(existing.rid);
+          if (rehashed.hash !== existing.hash) {
+            result.updated.push({
+              path: file,
+              type: existing.type,
+              rid: existing.rid
+            });
+            await this.logSync('updated', file, 'hash changed');
+          }
+        }
+      } catch (e) {
+        result.skipped.push({
+          path: file,
+          error: e.message
+        });
+      }
+    }
+
+    const dbResources = await this.resourceService.getAll();
+    for (const resource of dbResources) {
       try {
         if (!await fs.pathExists(resource.path)) {
           await this.resourceService.delete(resource.rid, true);
-        } else {
-          await this.resourceService.rehash(resource.rid);
+          result.deleted.push({
+            path: resource.path,
+            type: resource.type,
+            rid: resource.rid
+          });
+          await this.logSync('deleted', resource.path, 'file not found');
         }
       } catch (e) {
-        console.warn(`Failed to sync ${resource.path}: ${e.message}`);
+        result.skipped.push({
+          path: resource.path,
+          error: e.message
+        });
       }
     }
+
+    await this.setLastSyncTime(currentTime);
+
+    result.total = result.added.length + result.deleted.length + result.updated.length;
     
-    return resources.length;
+    return result;
+  }
+
+  async commit(message, stagingResult) {
+    await this.db.run(
+      'INSERT INTO commits (message, timestamp, added, deleted, renamed) VALUES (?, ?, ?, ?, ?)',
+      [message, Date.now(), stagingResult.added, stagingResult.deleted, stagingResult.renamed]
+    );
+  }
+
+  async getCommits(limit = 20) {
+    return await this.db.all(
+      'SELECT * FROM commits ORDER BY timestamp DESC LIMIT ?',
+      [limit]
+    );
   }
 
   startWatcher(callback) {
@@ -176,6 +303,63 @@ class Repository {
     
     this.watcher.start();
     return this;
+  }
+
+  async _syncNewFiles() {
+    const resourcesDir = path.join(this.repoPath, 'resources');
+    
+    if (!await fs.pathExists(resourcesDir)) {
+      return { added: 0, deleted: 0, updated: 0, moved: 0 };
+    }
+
+    const lastSyncTime = await this.getLastSyncTime();
+    const currentTime = Date.now();
+
+    const files = glob.sync('**/*', {
+      cwd: resourcesDir,
+      ignore: ['**/node_modules/**', '**/.git/**'],
+      absolute: true,
+      nodir: true
+    });
+
+    let addedCount = 0;
+    let movedCount = 0;
+    for (const file of files) {
+      try {
+        if (!ResourceType.isSupported(file)) {
+          continue;
+        }
+
+        const stats = await fs.stat(file);
+        const mtime = stats.mtime.getTime();
+
+        if (lastSyncTime > 0 && mtime < lastSyncTime) {
+          continue;
+        }
+
+        const existingByPath = await this.resourceService.getByPath(file);
+        if (existingByPath) {
+          continue;
+        }
+
+        const existingByHash = await this.resourceService.getByHash(file);
+        if (existingByHash) {
+          await this.resourceService.update(existingByHash.rid, { path: file });
+          movedCount++;
+        } else {
+          await this.resourceService.importFile(file);
+          addedCount++;
+        }
+      } catch (e) {
+        console.warn(`Failed to sync ${file}: ${e.message}`);
+      }
+    }
+
+    if (addedCount > 0 || movedCount > 0) {
+      await this.setLastSyncTime(currentTime);
+    }
+    
+    return { added: addedCount, deleted: 0, updated: 0, moved: movedCount };
   }
 
   async _handleFileEvent(event) {

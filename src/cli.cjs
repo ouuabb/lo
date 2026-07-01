@@ -23,6 +23,11 @@ const help = require('./commands/help.cjs');
 const importCmd = require('./commands/import.cjs');
 const sync = require('./commands/sync.cjs');
 const manual = require('./commands/manual.cjs');
+const status = require('./commands/status.cjs');
+const add = require('./commands/add.cjs');
+const commit = require('./commands/commit.cjs');
+const reset = require('./commands/reset.cjs');
+const log = require('./commands/log.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -261,9 +266,64 @@ cli
       });
   }, configCmd)
 
-  .command('sync', '同步资源', {}, sync)
+  .command('sync', '同步资源', (yargs) => {
+    yargs
+      .option('full', {
+        type: 'boolean',
+        description: '执行全量同步（扫描所有文件，而非增量）',
+        default: false
+      })
+      .option('quiet', {
+        type: 'boolean',
+        description: '静默模式，不输出详细报告',
+        default: false
+      });
+  }, sync)
 
-  .command('manual', '查看完整手册', {}, manual);
+  .command('manual', '查看完整手册', {}, manual)
+
+  .command('status', '查看工作区状态', (yargs) => {
+    yargs.option('path', {
+      type: 'string',
+      description: '仓库路径',
+      default: process.cwd()
+    });
+  }, status)
+
+  .command('add [path]', '添加文件到暂存区', (yargs) => {
+    yargs
+      .positional('path', {
+        type: 'string',
+        description: '文件或目录路径，使用 . 添加所有'
+      });
+  }, add)
+
+  .command('commit', '提交暂存区到仓库', (yargs) => {
+    yargs
+      .option('message', {
+        type: 'string',
+        alias: 'm',
+        description: '提交信息'
+      });
+  }, commit)
+
+  .command('reset [path]', '取消暂存或清空暂存区', (yargs) => {
+    yargs
+      .positional('path', {
+        type: 'string',
+        description: '文件路径，使用 HEAD 清空所有'
+      });
+  }, reset)
+
+  .command('log', '查看提交历史', (yargs) => {
+    yargs
+      .option('limit', {
+        type: 'number',
+        alias: 'n',
+        description: '显示数量限制',
+        default: 20
+      });
+  }, log);
 
 cli.fail((msg, err, yargs) => {
   if (err) {

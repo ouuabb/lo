@@ -69,6 +69,34 @@ class Database {
     await this.run(`
       CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_rid)
     `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS sync_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        path TEXT,
+        details TEXT
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS sync_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS commits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        added INTEGER DEFAULT 0,
+        deleted INTEGER DEFAULT 0,
+        renamed INTEGER DEFAULT 0
+      )
+    `);
   }
 
   run(sql, params = []) {

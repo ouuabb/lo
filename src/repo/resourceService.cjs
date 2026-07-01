@@ -45,6 +45,17 @@ class ResourceService {
     return this._hydrate(row);
   }
 
+  async getByHash(filePath) {
+    const hash = await HashUtils.fromFile(filePath);
+    const row = await this.db.get(`
+      SELECT * FROM resources WHERE hash = ? AND deleted = 0
+    `, [hash]);
+    
+    if (!row) return null;
+    
+    return this._hydrate(row);
+  }
+
   async getAll(options = {}) {
     const { type, limit, offset } = options;
     

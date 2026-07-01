@@ -1,13 +1,35 @@
 const fs = require('fs-extra');
 const path = require('path');
+const chalk = require('chalk');
 const Logger = require('../utils/logger.cjs');
+const Repository = require('../repo/repository.cjs');
 
 module.exports = async function configCmd(argv) {
   const { action, key, dir } = argv;
   
-  const configPath = path.join(process.cwd(), '.note', 'config.json');
-  
   try {
+    if (key === 'autoSync') {
+      const repo = new Repository(process.cwd());
+      await repo.open();
+      
+      if (action === 'add') {
+        const value = dir === 'true' || dir === '1';
+        await repo.setConfig('autoSync', value);
+        Logger.success(`自动同步已${value ? '启用' : '禁用'}`);
+      } else if (action === 'list') {
+        const value = await repo.getConfig('autoSync', true);
+        Logger.title('同步配置');
+        console.log(`  autoSync: ${chalk[value ? 'green' : 'red'](value ? '启用' : '禁用')}`);
+        const lastSync = await repo.getConfig('lastSyncTime', 0);
+        console.log(`  lastSyncTime: ${lastSync > 0 ? new Date(lastSync).toLocaleString() : '从未'}`);
+      }
+      
+      await repo.close();
+      return;
+    }
+    
+    const configPath = path.join(process.cwd(), '.note', 'config.json');
+    
     let config = {};
     if (await fs.pathExists(configPath)) {
       config = await fs.readJson(configPath);
