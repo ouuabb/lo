@@ -1,6 +1,6 @@
 const path = require('path');
+const fs = require('fs-extra');
 const Logger = require('../utils/logger.cjs');
-const Repository = require('../repo/repository.cjs');
 const StringUtils = require('../utils/string.cjs');
 const DateUtils = require('../utils/date.cjs');
 
@@ -8,9 +8,6 @@ module.exports = async function newResource(argv) {
   const { title, type = 'note', tags, template, category } = argv;
 
   try {
-    const repo = new Repository(process.cwd());
-    await repo.open();
-
     const slug = StringUtils.slugify(title);
     const date = DateUtils.today();
     const filename = `${date}-${slug}.md`;
@@ -30,29 +27,19 @@ module.exports = async function newResource(argv) {
       typeof v === 'string' ? `${k}: ${v}` : `${k}: ${JSON.stringify(v)}`
     ).join('\n')}\n---\n\n# ${title}\n\n开始写作...\n`;
 
-    const metadata = {
-      title: title,
-      tags: frontmatter.tags,
-      category: category || null,
-      status: 'draft'
-    };
+    const filePath = path.join(process.cwd(), 'resources', filename);
+    await fs.ensureDir(path.dirname(filePath));
+    await fs.writeFile(filePath, content);
 
-    const resource = await repo.createResource(type, content, {
-      filename,
-      metadata
-    });
-
-    Logger.success(`资源已创建: ${resource.rid}`);
+    Logger.success(`资源已创建: ${filename}`);
     Logger.info('标题:', title);
     Logger.info('类型:', type);
     Logger.info('标签:', frontmatter.tags.join(', ') || '(无)');
     if (category) {
       Logger.info('分类:', category);
     }
-    Logger.info('位置:', resource.path);
-    Logger.info('编辑: lo edit ' + resource.rid);
-
-    await repo.close();
+    Logger.info('位置:', filePath);
+    Logger.info('运行 lo add 以将资源添加到暂存区');
 
   } catch (error) {
     Logger.error(`创建失败: ${error.message}`);
