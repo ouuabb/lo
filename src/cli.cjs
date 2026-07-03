@@ -28,6 +28,7 @@ const add = require('./commands/add.cjs');
 const commit = require('./commands/commit.cjs');
 const reset = require('./commands/reset.cjs');
 const log = require('./commands/log.cjs');
+const auth = require('./commands/auth.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -323,7 +324,36 @@ cli
         description: '显示数量限制',
         default: 20
       });
-  }, log);
+  }, log)
+
+  .command('auth <action>', '管理 SSH 身份认证（支持多设备）', (yargs) => {
+    yargs
+      .positional('action', {
+        type: 'string',
+        description: '认证操作',
+        choices: ['add', 'enable', 'remove', 'list', 'disable', 'status', 'verify', 'keys']
+      })
+      .option('key-path', {
+        type: 'string',
+        alias: 'k',
+        description: 'SSH 公钥路径（用于 add）'
+      })
+      .option('label', {
+        type: 'string',
+        alias: 'l',
+        description: '密钥标签，如"笔记本"、"台式机"（用于 add）'
+      })
+      .option('fingerprint', {
+        type: 'string',
+        alias: 'f',
+        description: '密钥指纹（用于 remove）'
+      })
+      .option('ttl', {
+        type: 'number',
+        description: '认证会话有效期（分钟，默认 15）',
+        default: 15
+      });
+  }, auth);
 
 cli.fail((msg, err, yargs) => {
   if (err) {

@@ -31,13 +31,22 @@ class Repository {
     return this;
   }
 
-  async open() {
+  async open({ skipAuth = false } = {}) {
     this.db = new Database(this.repoPath);
     await this.db.open();
     
     this.resourceService = new ResourceService(this.db);
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
+    
+    // 门禁：检查 SSH 认证（管理类命令可跳过）
+    if (!skipAuth) {
+      const authed = await this.ensureAuthenticated();
+      if (!authed) {
+        await this.db.close();
+        process.exit(1);
+      }
+    }
     
     return this;
   }
@@ -48,6 +57,71 @@ class Repository {
     }
     if (this.db) {
       await this.db.close();
+    }
+  }
+
+  // ──────────────────────────────────────
+  // SSH 认证
+  // ──────────────────────────────────────
+
+  /**
+   * 确保当前用户已通过 SSH 认证
+   * 如果仓库启用了认证且当前会话未验证，则执行挑战-应答认证
+   * @returns {Promise<boolean>} 是否通过认证
+   */
+  async ensureAuthenticated() {
+    const SshAuth = require('../utils/sshAuth.cjs');
+    const Logger = require('../utils/logger.cjs');
+
+    // 检查是否启用了认证
+    const enabled = await this.getConfig('auth.ssh.enabled');
+    if (!enabled) {
+      return true;
+    }
+
+    // 环境变量覆盖（用于 CI/CD 等场景）
+    if (process.env.LO_AUTH_SKIP === '1' || process.env.LO_AUTH_SKIP === 'true') {
+      return true;
+    }
+
+    // 检查会话缓存
+    const ttl = await this.getConfig('auth.ssh.sessionTtl', 15);
+    if (SshAuth.isSessionValid(this.repoPath, ttl)) {
+      return true;
+    }
+
+    // 读取所有注册的公钥
+    const keysJson = await this.getConfig('auth.ssh.keys');
+    if (!keysJson) {
+      Logger.error('认证配置已损坏，请重新启用: lo auth add');
+      return false;
+    }
+
+    let registeredKeys;
+    try {
+      registeredKeys = JSON.parse(keysJson);
+    } catch {
+      Logger.error('认证配置已损坏，请重新启用: lo auth add');
+      return false;
+    }
+
+    if (!Array.isArray(registeredKeys) || registeredKeys.length === 0) {
+      Logger.error('未注册任何 SSH 公钥，请执行: lo auth add');
+      return false;
+    }
+
+    // 多密钥验证：遍历所有注册公钥，任意一把通过即可
+    Logger.info('正在验证 SSH 身份...');
+    const result = await SshAuth.verifyMulti(registeredKeys);
+
+    if (result.success) {
+      const matched = registeredKeys[result.matchedIndex];
+      Logger.success(`SSH 认证通过 (${matched.label || matched.fingerprint || '未知密钥'})`);
+      SshAuth.setSessionCache(this.repoPath);
+      return true;
+    } else {
+      Logger.error(`SSH 认证失败: ${result.error}`);
+      return false;
     }
   }
 
