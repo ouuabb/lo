@@ -16,7 +16,7 @@ module.exports = async function move(argv) {
     } else {
       resource = await repo.getResourceByPath(rid);
       if (!resource) {
-        resource = await repo.getResourceByPath(process.cwd() + '/' + rid);
+        resource = await repo.getResourceByPath(path.join(process.cwd(), rid));
       }
     }
     

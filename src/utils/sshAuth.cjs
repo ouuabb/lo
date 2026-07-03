@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -215,7 +215,7 @@ class SshAuth {
    */
   static computeFingerprint(pubKeyPath) {
     try {
-      const out = execSync(`ssh-keygen -lf "${pubKeyPath}"`, {
+      const out = execFileSync('ssh-keygen', ['-lf', pubKeyPath], {
         stdio: 'pipe',
         windowsHide: true,
         encoding: 'utf8'
@@ -317,7 +317,7 @@ class SshAuth {
 
       // 7. 根据 ssh-keygen 版本选择签名方式
       if (this.supportsYSign()) {
-        return await this._verifyWithYSign(privKeyPath, allowedSignersFile, namespace, challengeFile, workDir);
+        return await this._verifyWithYSign(privKeyPath, allowedSignersFile, namespace, challengeFile, nonce);
       } else {
         return await this._verifyWithLegacy(privKeyPath, allowedSignersFile, challengeFile, workDir);
       }
@@ -379,17 +379,14 @@ class SshAuth {
         try {
           if (this.supportsYSign()) {
             const sigFile = `${challengeFile}.sig`;
-            execSync(
-              `ssh-keygen -Y sign -f "${localMatch.privateKeyPath}" -n ${namespace} "${challengeFile}"`,
+            execFileSync('ssh-keygen', ['-Y', 'sign', '-f', localMatch.privateKeyPath, '-n', namespace, challengeFile],
               { stdio: 'pipe', windowsHide: true, timeout: 30000 }
             );
-            execSync(
-              `ssh-keygen -Y verify -f "${allowedSignersFile}" -n ${namespace} -s "${sigFile}" < "${challengeFile}"`,
-              { stdio: 'pipe', windowsHide: true, timeout: 15000 }
+            execFileSync('ssh-keygen', ['-Y', 'verify', '-f', allowedSignersFile, '-n', namespace, '-s', sigFile],
+              { stdio: 'pipe', windowsHide: true, timeout: 15000, input: nonce }
             );
           } else {
-            execSync(
-              `ssh-keygen -s "${localMatch.privateKeyPath}" -I lo-cli -n lo-cli "${challengeFile}"`,
+            execFileSync('ssh-keygen', ['-s', localMatch.privateKeyPath, '-I', 'lo-cli', '-n', 'lo-cli', challengeFile],
               { stdio: 'pipe', windowsHide: true, timeout: 30000 }
             );
           }
@@ -414,13 +411,12 @@ class SshAuth {
   /**
    * 使用 ssh-keygen -Y sign/-Y verify（OpenSSH >= 8.1）
    */
-  static async _verifyWithYSign(privKeyPath, allowedSignersFile, namespace, challengeFile, workDir) {
+  static async _verifyWithYSign(privKeyPath, allowedSignersFile, namespace, challengeFile, nonce) {
     const sigFile = `${challengeFile}.sig`;
 
     try {
       // 签名
-      execSync(
-        `ssh-keygen -Y sign -f "${privKeyPath}" -n ${namespace} "${challengeFile}"`,
+      execFileSync('ssh-keygen', ['-Y', 'sign', '-f', privKeyPath, '-n', namespace, challengeFile],
         {
           stdio: 'pipe',
           windowsHide: true,
@@ -429,12 +425,12 @@ class SshAuth {
       );
 
       // 验证签名
-      execSync(
-        `ssh-keygen -Y verify -f "${allowedSignersFile}" -n ${namespace} -s "${sigFile}" < "${challengeFile}"`,
+      execFileSync('ssh-keygen', ['-Y', 'verify', '-f', allowedSignersFile, '-n', namespace, '-s', sigFile],
         {
           stdio: 'pipe',
           windowsHide: true,
-          timeout: 15000
+          timeout: 15000,
+          input: nonce
         }
       );
 
@@ -463,8 +459,7 @@ class SshAuth {
 
       // 尝试用 ssh-keygen 直接签名（某些旧版本支持）
       try {
-        execSync(
-          `ssh-keygen -s "${privKeyPath}" -I lo-cli -n lo-cli "${challengeFile}"`,
+        execFileSync('ssh-keygen', ['-s', privKeyPath, '-I', 'lo-cli', '-n', 'lo-cli', challengeFile],
           { stdio: 'pipe', windowsHide: true, timeout: 30000 }
         );
         return { success: true };

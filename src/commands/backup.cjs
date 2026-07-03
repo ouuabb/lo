@@ -19,7 +19,8 @@ module.exports = async function backup(argv) {
         const rel = path.relative(process.cwd(), src);
         return !rel.startsWith('node_modules') && 
                !rel.startsWith('.git') &&
-               !rel.startsWith('backups');
+               !rel.startsWith('backups') &&
+               !rel.startsWith('.repo' + path.sep + 'keys');
       }
     });
 

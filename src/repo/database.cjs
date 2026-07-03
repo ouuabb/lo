@@ -37,11 +37,19 @@ class Database {
         path TEXT NOT NULL,
         hash TEXT,
         metadata TEXT DEFAULT '{}',
+        encrypted INTEGER DEFAULT 0,
         created INTEGER NOT NULL,
         updated INTEGER NOT NULL,
         deleted INTEGER DEFAULT 0
       )
     `);
+
+    // 数据迁移：为已有仓库添加 encrypted 列
+    try {
+      await this.run('ALTER TABLE resources ADD COLUMN encrypted INTEGER DEFAULT 0');
+    } catch {
+      // 列已存在，忽略
+    }
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS relations (

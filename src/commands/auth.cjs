@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const Repository = require('../repo/repository.cjs');
 const SshAuth = require('../utils/sshAuth.cjs');
+const CryptoUtils = require('../utils/crypto.cjs');
 const Logger = require('../utils/logger.cjs');
 
 /**
@@ -112,6 +113,7 @@ async function handleAdd(keyPath, label, ttl) {
         const pubKey = SshAuth.getPublicKey(resolvedPath);
         selectedKey = {
           publicKey: pubKey.raw,
+          publicKeyPath: resolvedPath,
           fingerprint: fingerprint,
           keyType: pubKey.type,
           label: label || path.basename(resolvedPath, '.pub')
@@ -178,6 +180,7 @@ async function handleAdd(keyPath, label, ttl) {
       const pubKey = SshAuth.getPublicKey(key.publicKeyPath);
       selectedKey = {
         publicKey: pubKey.raw,
+        publicKeyPath: key.publicKeyPath,
         fingerprint: key.fingerprint,
         keyType: key.type,
         label: answer.keyLabel || os.hostname()
@@ -195,6 +198,24 @@ async function handleAdd(keyPath, label, ttl) {
     await saveRegisteredKeys(repo, existingKeys);
     await repo.setConfig('auth.ssh.enabled', 'true');
     await repo.setConfig('auth.ssh.sessionTtl', String(ttl || 15));
+
+    // ── 使用 SSH 密钥保护仓库加密密钥 ──
+    if (CryptoUtils.isEncryptionEnabled(repo.repoPath)) {
+      Logger.info('正在使用 SSH 密钥保护仓库加密密钥...');
+      const protectResult = await repo.protectCryptoKey(
+        selectedKey.publicKeyPath,
+        selectedKey.fingerprint,
+        selectedKey.label
+      );
+
+      if (protectResult.success) {
+        Logger.success(`加密密钥已受 SSH 密钥 "${selectedKey.label}" 保护`);
+        Logger.info('  (其他设备需要使用已注册的 SSH 私钥才能解密文件)');
+      } else {
+        Logger.warn(`加密密钥保护失败: ${protectResult.error}`);
+        Logger.info('  仓库文件仍使用明文密钥加密，SSH 认证仅用于门禁');
+      }
+    }
 
     Logger.success(`已注册 SSH 密钥: ${selectedKey.label}`);
     Logger.info(`  指纹: ${selectedKey.fingerprint}`);
@@ -221,6 +242,7 @@ async function handleRemove(fingerprint) {
     }
 
     let existingKeys = await getRegisteredKeys(repo);
+    let removed;
 
     if (fingerprint) {
       // 通过指纹精确删除
@@ -229,7 +251,7 @@ async function handleRemove(fingerprint) {
         Logger.error(`未找到指纹为 ${fingerprint} 的密钥`);
         return;
       }
-      const removed = existingKeys.splice(index, 1)[0];
+      removed = existingKeys.splice(index, 1)[0];
       Logger.success(`已移除密钥: ${removed.label} (${fingerprint})`);
     } else {
       // 交互式选择
@@ -257,7 +279,7 @@ async function handleRemove(fingerprint) {
         }))
       }]);
 
-      const removed = existingKeys.splice(answer.keyIndex, 1)[0];
+      removed = existingKeys.splice(answer.keyIndex, 1)[0];
       Logger.success(`已移除密钥: ${removed.label}`);
     }
 
@@ -269,6 +291,16 @@ async function handleRemove(fingerprint) {
     } else {
       await saveRegisteredKeys(repo, existingKeys);
       Logger.info(`剩余 ${existingKeys.length} 把密钥`);
+    }
+
+    // ── 清除受保护的加密密钥副本 ──
+    if (CryptoUtils.isEncryptionEnabled(repo.repoPath)) {
+      // 对于通过 fingerprint 精确删除的，清理对应的保护文件
+      if (fingerprint) {
+        repo.removeProtectedCryptoKey(fingerprint);
+      } else if (removed && removed.fingerprint) {
+        repo.removeProtectedCryptoKey(removed.fingerprint);
+      }
     }
   } finally {
     await repo.close();

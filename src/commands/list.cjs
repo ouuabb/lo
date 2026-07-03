@@ -84,7 +84,7 @@ module.exports = async function list(argv) {
       
       if (dbPaths.has(absPath) && !isInStaging) {
         const dbResource = dbPaths.get(absPath);
-        const currentHash = await HashUtils.fromFile(absPath);
+        const currentHash = await HashUtils.fromFile(absPath, repo.cryptoKey);
         
         if (currentHash !== dbResource.hash) {
           allResources.push({

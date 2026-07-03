@@ -1,7 +1,9 @@
 const fs = require('fs-extra');
 const path = require('path');
+const chalk = require('chalk');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
+const CryptoUtils = require('../utils/crypto.cjs');
 
 module.exports = async function init(argv) {
   const targetPath = argv.path || process.cwd();
@@ -17,6 +19,14 @@ module.exports = async function init(argv) {
     const repo = await Repository.create(targetPath);
     await repo.close();
 
+    // ── 生成端到端加密密钥 ──
+    const { repoKey, keyFilePath } = CryptoUtils.initRepoKey(targetPath);
+    Logger.success(`端到端加密密钥已生成 (AES-256-GCM)`);
+    Logger.info(`  密钥文件: ${path.relative(targetPath, keyFilePath)}`);
+    Logger.info(`  密钥强度: 256-bit`);
+    Logger.info(`  加密算法: AES-256-GCM (认证加密)`);
+    Logger.info(`  文件格式: LOEC v1 (魔数 + 版本 + IV + 密文 + 认证标签)`);
+
     await fs.ensureDir(path.join(targetPath, 'templates'));
 
     const templatePath = path.join(targetPath, 'templates', 'default.md.template');
@@ -30,6 +40,11 @@ module.exports = async function init(argv) {
 
     Logger.success(`资源仓库初始化完成: ${targetPath}`);
     Logger.info(`资源目录: resources/`);
+    Logger.info('');
+    Logger.info('安全提示:');
+    Logger.info(`  仓库文件已启用端到端加密保护`);
+    Logger.info(`  执行 ${chalk.cyan('lo auth add')} 绑定 SSH 密钥以保护加密密钥`);
+    Logger.info('');
     Logger.info('接下来你可以:');
     Logger.info('  lo new "我的第一篇笔记"');
     Logger.info('  lo import /path/to/files       导入现有文件');

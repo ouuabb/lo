@@ -18,13 +18,17 @@ class Repository {
     this.queryEngine = null;
     this.watcher = null;
     this.staging = new StagingArea(repoPath);
+    /** @type {Buffer|null} 解密后的仓库加密密钥（仅存在于内存中） */
+    this._cryptoKey = null;
   }
 
   async init() {
     this.db = new Database(this.repoPath);
     await this.db.init();
     
-    this.resourceService = new ResourceService(this.db);
+    this.resourceService = new ResourceService(this.db, {
+      getCryptoKey: () => this._cryptoKey
+    });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
     
@@ -35,7 +39,9 @@ class Repository {
     this.db = new Database(this.repoPath);
     await this.db.open();
     
-    this.resourceService = new ResourceService(this.db);
+    this.resourceService = new ResourceService(this.db, {
+      getCryptoKey: () => this._cryptoKey
+    });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
     
@@ -47,8 +53,20 @@ class Repository {
         process.exit(1);
       }
     }
+
+    // 加载加密密钥到内存
+    await this._loadCryptoKey({ skipAuth });
     
     return this;
+  }
+
+  /**
+   * 获取当前会话的加密密钥（返回副本，仅内存中存在）
+   * 调用方获得的是独立副本，close() 时安全擦除不影响外部引用
+   * @returns {Buffer|null}
+   */
+  get cryptoKey() {
+    return this._cryptoKey ? Buffer.from(this._cryptoKey) : null;
   }
 
   async close() {
@@ -58,6 +76,94 @@ class Repository {
     if (this.db) {
       await this.db.close();
     }
+    // 安全清除内存中的加密密钥，防止冷启动攻击和内存 dump 泄漏
+    if (this._cryptoKey) {
+      this._cryptoKey.fill(0);
+      this._cryptoKey = null;
+    }
+  }
+
+  // ──────────────────────────────────────
+  // 加密密钥管理
+  // ──────────────────────────────────────
+
+  /**
+   * 加载仓库加密密钥到内存
+   *
+   * 流程:
+   *   1. 检查仓库是否启用了加密 (isEncryptionEnabled)
+   *   2. 优先尝试从受保护的 SSH 密钥副本解密
+   *   3. 降级: 从明文副本直接加载 (未配置 SSH 保护的场景)
+   *
+   * @param {{ skipAuth?: boolean }} options
+   */
+  async _loadCryptoKey(options = {}) {
+    const CryptoUtils = require('../utils/crypto.cjs');
+    const SshAuth = require('../utils/sshAuth.cjs');
+
+    if (!CryptoUtils.isEncryptionEnabled(this.repoPath)) {
+      return; // 仓库未启用加密
+    }
+
+    // 尝试从受保护的密钥副本解密（需要 SSH 密钥）
+    const keysJson = await this.getConfig('auth.ssh.keys');
+    if (keysJson) {
+      try {
+        const registeredKeys = JSON.parse(keysJson);
+        const localKeys = SshAuth.listKeys();
+
+        for (const regKey of registeredKeys) {
+          if (!regKey.fingerprint) continue;
+
+          const localMatch = localKeys.find(k => k.fingerprint === regKey.fingerprint);
+          if (!localMatch) continue;
+
+          const result = CryptoUtils.unlockRepoKey(
+            this.repoPath,
+            localMatch.publicKeyPath,
+            regKey.fingerprint
+          );
+
+          if (result.success) {
+            this._cryptoKey = result.repoKey;
+            return;
+          }
+        }
+      } catch {
+        // 解析失败，尝试降级方案
+      }
+    }
+
+    // 降级: 直接加载明文 RepoKey（适用于未配置 SSH 保护的场景）
+    // 仅在 SSH 保护密钥不存在或无法匹配时才降级
+    const repoKey = CryptoUtils.loadRepoKey(this.repoPath);
+    if (repoKey) {
+      const Logger = require('../utils/logger.cjs');
+      Logger.warn('正在使用未受保护的加密密钥（明文 repo.key 存在）');
+      Logger.warn('建议运行 lo auth add 使用 SSH 密钥保护仓库密钥');
+      this._cryptoKey = repoKey;
+    }
+  }
+
+  /**
+   * 使用 SSH 密钥保护仓库加密密钥
+   * @param {string} pubKeyPath - SSH 公钥路径
+   * @param {string} fingerprint - 密钥指纹
+   * @param {string} label - 密钥标签
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async protectCryptoKey(pubKeyPath, fingerprint, label) {
+    const CryptoUtils = require('../utils/crypto.cjs');
+    return CryptoUtils.protectRepoKeyWithSshKey(this.repoPath, pubKeyPath, fingerprint, label);
+  }
+
+  /**
+   * 移除受保护的加密密钥副本
+   * @param {string} fingerprint
+   */
+  async removeProtectedCryptoKey(fingerprint) {
+    const CryptoUtils = require('../utils/crypto.cjs');
+    return CryptoUtils.removeProtectedKey(this.repoPath, fingerprint, this._cryptoKey);
   }
 
   // ──────────────────────────────────────
@@ -153,13 +259,21 @@ class Repository {
 
   async createResource(type, content, options = {}) {
     const { filename, metadata = {} } = options;
+    const CryptoUtils = require('../utils/crypto.cjs');
     
     const ext = ResourceType.getExtensions(type)[0] || '.md';
     const name = filename || `${Date.now()}${ext}`;
     const filePath = path.join(this.repoPath, 'resources', name);
     
     await fs.ensureDir(path.dirname(filePath));
-    await fs.writeFile(filePath, content);
+
+    // 使用 ResourceService 的统一写入方法（自动处理加密）
+    const contentBuf = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf-8');
+    if (this._cryptoKey) {
+      await CryptoUtils.writeEncryptedFile(filePath, contentBuf, this._cryptoKey);
+    } else {
+      await fs.writeFile(filePath, contentBuf);
+    }
     
     return this.resourceService.create({
       type,

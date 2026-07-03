@@ -3,7 +3,7 @@ const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
 
 module.exports = async function stats(argv) {
-  const { today, week } = argv;
+  const { } = argv; // today/week 选项预留，尚未实现后端过滤
   
   try {
     const repo = new Repository(process.cwd());

@@ -1,3 +1,4 @@
+const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
 
@@ -15,7 +16,7 @@ module.exports = async function tag(argv) {
     } else {
       resource = await repo.getResourceByPath(rid);
       if (!resource) {
-        resource = await repo.getResourceByPath(process.cwd() + '/' + rid);
+        resource = await repo.getResourceByPath(path.join(process.cwd(), rid));
       }
     }
     

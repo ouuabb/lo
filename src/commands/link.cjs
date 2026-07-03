@@ -1,3 +1,4 @@
+const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
 
@@ -15,7 +16,7 @@ module.exports = async function link(argv) {
     } else {
       resourceA = await repo.getResourceByPath(from);
       if (!resourceA) {
-        resourceA = await repo.getResourceByPath(process.cwd() + '/' + from);
+        resourceA = await repo.getResourceByPath(path.join(process.cwd(), from));
       }
     }
 
@@ -24,7 +25,7 @@ module.exports = async function link(argv) {
     } else {
       resourceB = await repo.getResourceByPath(to);
       if (!resourceB) {
-        resourceB = await repo.getResourceByPath(process.cwd() + '/' + to);
+        resourceB = await repo.getResourceByPath(path.join(process.cwd(), to));
       }
     }
 

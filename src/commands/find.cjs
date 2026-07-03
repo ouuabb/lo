@@ -11,16 +11,25 @@ module.exports = async function find(argv) {
 
     const results = await repo.search(query);
     
+    // 在命令层应用过滤
+    let filtered = results;
+    if (type) {
+      filtered = filtered.filter(r => r.type === type);
+    }
+    if (limit > 0) {
+      filtered = filtered.slice(0, limit);
+    }
+    
     await repo.close();
 
-    if (results.length === 0) {
+    if (filtered.length === 0) {
       Logger.info(`未找到匹配 "${query}" 的资源`);
       return;
     }
 
-    Logger.title(`搜索结果: "${query}" (共 ${results.length} 个)`);
+    Logger.title(`搜索结果: "${query}" (共 ${filtered.length} 个)`);
     
-    results.forEach((resource, index) => {
+    filtered.forEach((resource, index) => {
       const title = resource.metadata.title || '未命名';
       const typeColor = chalk.blue(resource.type);
       const created = new Date(resource.created).toLocaleDateString();
