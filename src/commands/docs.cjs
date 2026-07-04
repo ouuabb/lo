@@ -42,6 +42,106 @@ const SECTIONS = {
     bin/            → 入口脚本`);
   },
 
+  concepts: () => {
+    console.log(chalk.bold.cyan('\n  lo - 核心设计观念'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+
+    console.log(chalk.bold.yellow('\n  一、资源平等 —— 万物皆资源'));
+    console.log(`
+  在 lo 中，仓库里的每一个个体都被视为一个“资源”，没有任何区分。
+  无论是 Markdown 笔记、PDF 论文、PNG 截图、二进制文件还是自定义格式的
+  数据，一旦进入仓库，它们就是完全平等的资源。
+
+  这种设计的含义：
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  资源类型        │  在 lo 中的行为                         │
+  ├─────────────────────────────────────────────────────────────┤
+  │  .md 笔记        │  创建 → 散列 → 索引 → 可搜索           │
+  │  .pdf 论文       │  创建 → 散列 → 索引 → 不可搜索内容     │
+  │  .png 截图       │  创建 → 散列 → 索引 → 不可搜索内容     │
+  │  .jpg 照片       │  创建 → 散列 → 索引 → 不可搜索内容     │
+  │  任意二进制文件   │  创建 → 散列 → 索引 → 不可搜索内容     │
+  └─────────────────────────────────────────────────────────────┘
+
+  统一的处理流程：文件进入 resources/ 目录 → 计算 SHA-256 明文散列
+  → 可选加密为 LOEC 格式 → 写入数据库索引。
+
+  不存在“笔记”和“附件”的区别。不存在“文本文件”和“二进制文件”的区别。
+  不存在“可 diff”和“不可 diff”的区别。所有资源共享同一套操作：
+  - create（创建）
+  - update（更新 → 实际上新散列 = 新资源）
+  - delete（软删除）
+  - move（移动/重命名）
+  - tag（标记）
+
+  这种设计使得 lo 并非“笔记软件附带文件管理”，而是一个通用的、版本化的、
+  加密的内容定位仓库，其中文本笔记只是资源的一种而已。
+
+  设计目的：
+  - 用户不需要区分“文件夹”和“标签”，一维的标签体系覆盖所有
+  - 搜索、过滤、关联在所有资源类型上统一可用
+  - 跨设备同步时所有资源同等对待，没有特殊路径
+  - 未来扩展（如添加对 .py/.js 代码文件的 diff 支持）不影响现有模型`);
+
+    console.log(chalk.bold.yellow('\n  二、RID 唯一且独立 —— 标识符是纯粹的'));
+    console.log(`
+  每个资源在创建时被分配一个 RID（Resource Identifier，资源标识符），
+  格式为 "res_" 前缀 + 随机字符串，例如 "res_a1b2c3d4e5"。
+
+  RID 的核心特性：
+
+  1. 随机生成，不派生自任何属性
+     RID 由 crypto.randomBytes 生成，与文件内容、散列、路径、创建时间、
+     文件类型、加密状态等任何属性都无关。
+     即使两个文件内容完全相同的资源，它们的 RID 也必然不同。
+
+  2. RID 是资源的永久身份
+     一旦创建，RID 永不变更。资源在仓库内的整个生命周期中，
+     无论内容被修改多少次、路径被移动多少次、标签被添加或删除多少次，
+     RID 始终不变。
+     （当资源内容修改时，产生的是一个新的散列值，并非新的 RID。）
+
+  3. RID 为什么不能与 hash 绑定
+     - 内容可能重复：两个 PDF 文件内容相同，不应该用同一个 RID
+     - 散列可能碰撞：即使概率极低，RID 的随机性要求其不能依赖散列
+     - 更新产生新散列：资源更新时，散列变化但资源身份不变
+     - 加密影响散列：加密文件存储的是明文散列，但 RID 独立于此
+     - 语义上：RID 代表“这个实体”，散列代表“这个状态”
+
+  4. RID 为什么不能与路径绑定
+     - 资源可以被移动/重命名（路径变化但身份不变）
+     - 路径是元数据，不是身份
+
+  5. RID 为什么不能与文件名绑定
+     - 两个资源可以有相同文件名但内容不同
+     - 文件名可随时修改
+
+  6. 跨设备同步中的 RID
+     操作日志在同步时携带 RID，接收方原样记录。
+     不存在“两台设备生成不同的 RID 指向同一个资源”的冲突，
+     因为 RID 由创建设备生成并随操作日志传播，接收方不会重新生成。`);
+
+    console.log(chalk.bold.yellow('\n  三、资源是不可变实体'));
+    console.log(`
+  在 lo 的存储模型中，资源的内容是不可变的。
+
+  当你修改一个资源的文件内容时：
+    原始状态:  RID=res_abc,  hash=sha256_A,  文件内容=版本1
+    修改后:    RID=res_abc,  hash=sha256_B,  文件内容=版本2
+
+  RID 不变（仍然是同一个资源），但 hash 变了（内容变了）。
+
+  提交历史记录了每次散列的变化，你可以通过 lo log 查看。
+
+  如果启用了加密：
+    加密前的明文版本1 → 散列 sha256_A → 加密为 LOEC 密文
+    加密前的明文版本2 → 散列 sha256_B → 加密为 LOEC 密文
+
+  数据库存储的始终是明文散列。这意味着加密文件的变更可以通过
+  明文散列精确检测，而密文（含随机 IV）每次都会不同。`);
+  },
+
   encryption: () => {
     console.log(chalk.bold.cyan('\n  端到端加密系统'));
 
@@ -393,6 +493,101 @@ const SECTIONS = {
   └─────────────────────────────┴─────────────────────────┘`);
   },
 
+  sync: () => {
+    console.log(chalk.bold.cyan('\n  远程同步系统'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  lo 的远程同步系统让你在多台设备间同步笔记库，
+  同时保持端到端加密的完整性和数据自主。
+
+  核心设计原则：
+  - 以操作日志为单位同步，不同步 SQLite 文件
+  - 批次原子性：每个同步批次要么全应用，要么全丢弃
+  - 冲突保留：检测到冲突时保留所有版本，不静默覆盖
+
+  ┌──────────┐   lo push    ┌──────────────┐   lo pull    ┌──────────┐
+  │  设备 A   │ ──────────► │  中继/服务器   │ ◄────────── │  设备 B   │
+  │  写笔记   │             │  存放批次文件   │             │  读笔记   │
+  └──────────┘             └──────────────┘             └──────────┘
+
+  命令一览：
+    lo push <remote>      推送本地变更到远程
+    lo pull <remote>      从远程拉取变更到本地
+    lo clone <remote>     从远程克隆完整仓库
+
+  远程地址格式：
+    user@host:/path/to/repo      通过 SSH/SCP 传输
+    /local/path/to/repo          本地路径（共享目录/移动硬盘）
+
+  同步的数据：
+    - resources/ 全部资源文件（保持 LOEC 加密状态）
+    - 操作日志（增量变更记录）
+    - 同步锚点（追踪同步进度）
+    - .repo/keys/protected_*.key（各设备的密钥保护文件）
+
+  不同步的数据：
+    - database.sqlite（每台设备独立维护，可重建）
+    - staging.json（暂存区状态）
+
+  操作日志类型：
+    resource_created    创建资源（文件 + DB 记录）
+    resource_updated    更新资源（散列变更）
+    resource_deleted    删除资源
+    resource_moved      移动/重命名
+    resource_tagged     标签变更
+
+  批次格式：
+    每个同步批次是一个 gzipped tarball：
+      manifest.json      ← 批次清单（设备 ID、时间戳、校验和列表）
+      ops.json           ← 操作日志条目数组
+      checksums.json     ← 所有文件 SHA-256 校验和
+      resources/         ← 关联的资源文件（保持加密状态）
+
+  批次完整性保证：
+    1. 打包时计算所有文件的 SHA-256 校验和
+    2. 写入 checksums.json
+    3. 接收方解包后逐一验证
+    4. 校验不匹配 → 丢弃整个批次 → 提示重试
+
+  同步锚点（Anchor）：
+    每对 (本地设备, 远程地址) 维护一个锚点：
+    { last_op_id, last_op_timestamp }
+    - push: 只发送锚点之后的新操作
+    - pull: 记录远程的最后操作，下次增量拉取
+
+  冲突检测与处理：
+    ┌────────────────────┬───────────────────────────────┐
+    │  冲突类型          │  处理策略                      │
+    ├────────────────────┼───────────────────────────────┤
+    │  edit vs edit      │  保留远程版本 + 本地存 .conflict │
+    │  delete vs edit    │  保留本地编辑版本              │
+    │  正常操作          │  直接应用                      │
+    │  重复操作（幂等）   │  自动跳过                      │
+    └────────────────────┴───────────────────────────────┘
+
+  多设备使用流程：
+    # 设备 A：创建仓库并首次推送
+    lo init
+    lo new "我的笔记"
+    lo push user@server:/notes
+
+    # 设备 B：克隆仓库
+    lo clone user@server:/notes --dest ./notes
+    cd notes
+    lo auth add -k ~/.ssh/id_ed25519
+
+    # 日常同步
+    设备 A: lo push user@server:/notes
+    设备 B: lo pull user@server:/notes
+
+  安全性：
+    - 传输层：SSH/SCP 提供加密通道
+    - 文件层：资源文件始终以 LOEC 加密格式传输
+    - 密钥层：protected_*.key 通过 SSH 私钥保护
+    - 完整性：SHA-256 校验和防篡改
+    - 中间人不安全：即使中继服务器被攻破，攻击者只能拿到加密密文`);
+  },
+
   quickstart: () => {
     console.log(chalk.bold.cyan('\n  快速上手指南'));
     console.log(`
@@ -430,6 +625,12 @@ const SECTIONS = {
 
 const TOPIC_ALIASES = {
   overview: 'overview',
+  concepts: 'concepts',
+  concept: 'concepts',
+  philosophy: 'concepts',
+  design: 'concepts',
+  rid: 'concepts',
+  resource: 'concepts',
   encryption: 'encryption',
   encrypt: 'encryption',
   e2ee: 'encryption',
@@ -441,6 +642,11 @@ const TOPIC_ALIASES = {
   db: 'database',
   security: 'security',
   safe: 'security',
+  sync: 'sync',
+  push: 'sync',
+  pull: 'sync',
+  clone: 'sync',
+  remote: 'sync',
   quickstart: 'quickstart',
   start: 'quickstart',
   guide: 'quickstart'
@@ -454,11 +660,13 @@ function printIndex() {
 
   const topics = [
     { id: 'overview',    name: '项目概述',       desc: '核心理念、数据自主、零知识架构' },
+    { id: 'concepts',    name: '核心设计观念',   desc: '资源平等、RID 独立性、不可变实体' },
     { id: 'encryption',  name: '端到端加密系统',  desc: 'AES-256-GCM、LOEC 格式、密钥分层、HKDF' },
     { id: 'auth',        name: 'SSH 身份认证',    desc: '挑战-应答协议、多设备支持、会话缓存' },
     { id: 'version',     name: '版本控制系统',    desc: '暂存区、提交历史、状态检测' },
     { id: 'database',    name: '数据库与索引',    desc: 'SQLite 表结构、明文散列、加密感知' },
     { id: 'security',    name: '安全设计摘要',    desc: '9 项安全措施一览' },
+    { id: 'sync',       name: '远程同步系统',    desc: '多设备同步、操作日志、冲突处理' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
 

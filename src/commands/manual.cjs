@@ -354,6 +354,120 @@ const SECTIONS = {
     ]
   },
 
+  push: {
+    title: 'push — 推送变更到远程设备',
+    usage: 'lo push <remote|别名> [--full]',
+    description: [
+      '将本地操作日志和资源文件打包，推送到远程设备。',
+      '远程设备需要运行 lo pull 来接收。',
+      '',
+      '工作原理:',
+      '  1. 扫描本地资源变更（lo sync）',
+      '  2. 收集自上次推送以来的所有操作日志',
+      '  3. 将操作日志和关联的资源文件打包为同步批次',
+      '  4. 通过 SCP 推送到远程主机',
+      '  5. 更新本地同步锚点',
+      '',
+      '远程地址格式:',
+      '  user@host:/path/to/repo             # SSH 远程',
+      '  /local/path/to/repo                 # 本地路径（用于测试）',
+      '  别名                                # 预先通过 lo remote add 配置的名称',
+      '',
+      '选项:',
+      '  --full                              # 全量推送，忽略增量锚点',
+      '',
+      '示例:',
+      '  lo push me@desktop:~/notes          # 推送到远程桌面',
+      '  lo push myserver                    # 使用别名推送',
+      '  lo push /mnt/shared/notes           # 推送到本地共享目录',
+      '  lo push --full me@server:/notes     # 全量推送到服务器'
+    ]
+  },
+
+  pull: {
+    title: 'pull — 从远程设备拉取变更',
+    usage: 'lo pull <remote|别名>',
+    description: [
+      '从远程设备拉取同步批次，应用操作日志到本地。',
+      '',
+      '工作原理:',
+      '  1. 连接远程主机，列出所有同步批次',
+      '  2. 拉取最新批次的 tar.gz 包',
+      '  3. 验证批次的 SHA-256 校验和',
+      '  4. 安装资源文件到本地 resources/ 目录',
+      '  5. 逐条应用操作日志（含冲突检测）',
+      '  6. 更新本地同步锚点',
+      '',
+      '冲突处理:',
+      '  - 同一资源两边都编辑了 → 保留远程版本，本地另存为 .conflict',
+      '  - 远程删除但本地有编辑 → 保留本地版本',
+      '  - 正常操作 → 直接应用',
+      '',
+      '远程地址格式:（同 push）',
+      '',
+      '示例:',
+      '  lo pull me@laptop:~/notes           # 从笔记本拉取变更',
+      '  lo pull myserver                    # 使用别名拉取',
+      '  lo pull /mnt/shared/notes           # 从共享目录拉取'
+    ]
+  },
+
+  clone: {
+    title: 'clone — 从远程仓库克隆',
+    usage: 'lo clone <remote|别名> [--dest <path>]',
+    description: [
+      '从远程仓库克隆完整副本到新设备。',
+      '',
+      '工作原理:',
+      '  1. 初始化目标目录',
+      '  2. 拉取远程所有同步批次',
+      '  3. 初始化本地仓库（需要手动设置加密密钥）',
+      '  4. 安装所有资源文件',
+      '  5. 应用全部操作日志重建索引',
+      '',
+      '前置条件:',
+      '  - 远程仓库已在另一台设备上通过 lo push 推送过',
+      '  - 如果仓库启用了加密，需要先在本地 lo auth add 绑定 SSH 密钥',
+      '',
+      '选项:',
+      '  --dest, -d                           # 克隆目标目录（默认当前目录）',
+      '',
+      '示例:',
+      '  lo clone me@server:/notes --dest ./my-notes',
+      '  lo clone myserver -d ~/notes           # 使用别名克隆',
+      '  lo clone /shared/notes -d ~/notes'
+    ]
+  },
+
+  remote: {
+    title: 'remote — 管理远程仓库别名',
+    usage: 'lo remote <add|remove|list> [别名] [地址]',
+    description: [
+      '管理远程仓库的别名，简化 push/pull/clone 命令的地址输入。',
+      '',
+      '操作:',
+      '  add <name> <url>    添加远程别名',
+      '  remove <name>       移除远程别名（也可用 rm）',
+      '  list                列出所有已配置的远程别名（也可用 ls）',
+      '',
+      '别名存储: 保存在仓库数据库的 sync_config 表中，',
+      '           每个仓库独立管理自己的远程别名。',
+      '',
+      '支持的命令: 配置别名后，push/pull/clone 都可以使用别名替代完整地址。',
+      '',
+      '示例:',
+      '  lo remote add myserver root@192.168.1.100:/data/notes',
+      '  lo remote add backup /mnt/backup/notes',
+      '  lo remote list',
+      '  lo remote remove backup',
+      '',
+      '使用别名:',
+      '  lo push myserver          # 等价于 lo push root@192.168.1.100:/data/notes',
+      '  lo pull myserver',
+      '  lo clone myserver --dest ./my-notes'
+    ]
+  },
+
   find: {
     title: 'find — 搜索资源',
     usage: 'lo find <关键词> [--limit <数量>] [--type <类型>]',
@@ -573,6 +687,7 @@ function printOverview() {
     { name: '基础命令', cmds: ['init', 'new', 'import', 'list', 'show', 'edit', 'delete'] },
     { name: '版本控制', cmds: ['add', 'commit', 'reset', 'log', 'status'] },
     { name: '资源管理', cmds: ['link', 'move', 'tag', 'sync'] },
+    { name: '远程同步', cmds: ['remote', 'push', 'pull', 'clone'] },
     { name: '搜索与查询', cmds: ['find', 'stats', 'index'] },
     { name: '安全', cmds: ['auth'] },
     { name: '其他', cmds: ['daily', 'backup', 'config', 'help', 'manual', 'docs'] }

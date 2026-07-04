@@ -4,6 +4,7 @@ const RelationService = require('./relationService.cjs');
 const QueryEngine = require('./queryEngine.cjs');
 const FileWatcher = require('./fileWatcher.cjs');
 const StagingArea = require('./staging.cjs');
+const SyncOpsEngine = require('./syncOps.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
 const path = require('path');
@@ -18,6 +19,7 @@ class Repository {
     this.queryEngine = null;
     this.watcher = null;
     this.staging = new StagingArea(repoPath);
+    this.syncOps = null;
     /** @type {Buffer|null} 解密后的仓库加密密钥（仅存在于内存中） */
     this._cryptoKey = null;
   }
@@ -31,6 +33,7 @@ class Repository {
     });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
+    this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
     
     return this;
   }
@@ -38,12 +41,15 @@ class Repository {
   async open({ skipAuth = false } = {}) {
     this.db = new Database(this.repoPath);
     await this.db.open();
+    // 确保全部表存在（为已有仓库做增量迁移）
+    await this.db.createTables();
     
     this.resourceService = new ResourceService(this.db, {
       getCryptoKey: () => this._cryptoKey
     });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
+    this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
     
     // 门禁：检查 SSH 认证（管理类命令可跳过）
     if (!skipAuth) {
@@ -275,11 +281,27 @@ class Repository {
       await fs.writeFile(filePath, contentBuf);
     }
     
-    return this.resourceService.create({
+    const result = await this.resourceService.create({
       type,
       path: filePath,
       metadata
     });
+
+    // 记录操作日志
+    if (this.syncOps) {
+      const relPath = path.relative(this.repoPath, filePath);
+      await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, result.rid, {
+        type,
+        path: relPath,
+        hash: result.hash,
+        metadata: result.metadata,
+        encrypted: result.encrypted,
+        created: result.created,
+        updated: result.updated
+      });
+    }
+    
+    return result;
   }
 
   async getResource(rid) {
@@ -295,15 +317,51 @@ class Repository {
   }
 
   async updateResource(rid, updates) {
-    return this.resourceService.update(rid, updates);
+    const oldResource = await this.resourceService.getByRid(rid);
+    const result = await this.resourceService.update(rid, updates);
+    
+    // 记录操作日志
+    if (this.syncOps && oldResource) {
+      await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_UPDATED, rid, {
+        path: path.relative(this.repoPath, oldResource.path),
+        old_hash: oldResource.hash,
+        new_hash: result.hash,
+        metadata: result.metadata
+      });
+    }
+    
+    return result;
   }
 
   async deleteResource(rid, soft = true) {
-    return this.resourceService.delete(rid, soft);
+    const resource = await this.resourceService.getByRid(rid);
+    const result = await this.resourceService.delete(rid, soft);
+    
+    // 记录操作日志
+    if (this.syncOps && resource) {
+      await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_DELETED, rid, {
+        path: path.relative(this.repoPath, resource.path),
+        type: resource.type,
+        hash: resource.hash
+      });
+    }
+    
+    return result;
   }
 
   async moveResource(rid, newPath) {
-    return this.resourceService.move(rid, newPath);
+    const oldResource = await this.resourceService.getByRid(rid);
+    const result = await this.resourceService.move(rid, newPath);
+    
+    // 记录操作日志
+    if (this.syncOps && oldResource) {
+      await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_MOVED, rid, {
+        old_path: path.relative(this.repoPath, oldResource.path),
+        new_path: path.relative(this.repoPath, newPath)
+      });
+    }
+    
+    return result;
   }
 
   async linkResources(ridA, ridB, type = 'reference') {
@@ -417,6 +475,20 @@ class Repository {
             rid: resource.rid
           });
           await this.logSync('added', file, resource.type);
+
+          // 记录操作日志
+          if (this.syncOps) {
+            const relPath = path.relative(this.repoPath, file);
+            await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+              type: resource.type,
+              path: relPath,
+              hash: resource.hash,
+              metadata: resource.metadata,
+              encrypted: resource.encrypted,
+              created: resource.created,
+              updated: resource.updated
+            });
+          }
         } else {
           const rehashed = await this.resourceService.rehash(existing.rid);
           if (rehashed.hash !== existing.hash) {
@@ -426,6 +498,17 @@ class Repository {
               rid: existing.rid
             });
             await this.logSync('updated', file, 'hash changed');
+
+            // 记录操作日志
+            if (this.syncOps) {
+              const relPath = path.relative(this.repoPath, file);
+              await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_UPDATED, existing.rid, {
+                path: relPath,
+                old_hash: existing.hash,
+                new_hash: rehashed.hash,
+                metadata: rehashed.metadata
+              });
+            }
           }
         }
       } catch (e) {
@@ -447,6 +530,16 @@ class Repository {
             rid: resource.rid
           });
           await this.logSync('deleted', resource.path, 'file not found');
+
+          // 记录操作日志
+          if (this.syncOps) {
+            const relPath = path.relative(this.repoPath, resource.path);
+            await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_DELETED, resource.rid, {
+              path: relPath,
+              type: resource.type,
+              hash: resource.hash
+            });
+          }
         }
       } catch (e) {
         result.skipped.push({

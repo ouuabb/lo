@@ -105,6 +105,28 @@ class Database {
         renamed INTEGER DEFAULT 0
       )
     `);
+
+    // 同步操作日志（用于跨设备同步）
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS sync_ops (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        op_id TEXT NOT NULL UNIQUE,
+        op_type TEXT NOT NULL,
+        rid TEXT,
+        data TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        device_id TEXT NOT NULL,
+        applied INTEGER DEFAULT 1
+      )
+    `);
+
+    await this.run(`
+      CREATE INDEX IF NOT EXISTS idx_sync_ops_timestamp ON sync_ops(timestamp)
+    `);
+
+    await this.run(`
+      CREATE INDEX IF NOT EXISTS idx_sync_ops_device ON sync_ops(device_id)
+    `);
   }
 
   run(sql, params = []) {

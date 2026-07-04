@@ -30,6 +30,7 @@ const commit = require('./commands/commit.cjs');
 const reset = require('./commands/reset.cjs');
 const log = require('./commands/log.cjs');
 const auth = require('./commands/auth.cjs');
+const remote = require('./commands/remote.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -268,7 +269,7 @@ cli
       });
   }, configCmd)
 
-  .command('sync', '同步资源', (yargs) => {
+  .command('sync', '同步资源（本地文件到数据库）', (yargs) => {
     yargs
       .option('full', {
         type: 'boolean',
@@ -281,6 +282,57 @@ cli
         default: false
       });
   }, sync)
+
+  .command('push <remote>', '推送变更到远程设备', (yargs) => {
+    yargs
+      .positional('remote', {
+        type: 'string',
+        description: '远程地址 (user@host:/path 或 /local/path) 或别名'
+      })
+      .option('full', {
+        type: 'boolean',
+        description: '全量推送（忽略增量锚点）',
+        default: false
+      });
+  }, sync)
+
+  .command('pull <remote>', '从远程设备拉取变更', (yargs) => {
+    yargs
+      .positional('remote', {
+        type: 'string',
+        description: '远程地址 (user@host:/path 或 /local/path) 或别名'
+      });
+  }, sync)
+
+  .command('clone <remote>', '从远程仓库克隆', (yargs) => {
+    yargs
+      .positional('remote', {
+        type: 'string',
+        description: '远程地址 (user@host:/path 或 /local/path) 或别名'
+      })
+      .option('dest', {
+        type: 'string',
+        description: '克隆目标目录',
+        alias: 'd'
+      });
+  }, sync)
+
+  .command('remote <action> [name] [url]', '管理远程仓库别名', (yargs) => {
+    yargs
+      .positional('action', {
+        type: 'string',
+        description: '操作类型',
+        choices: ['add', 'remove', 'rm', 'list', 'ls']
+      })
+      .positional('name', {
+        type: 'string',
+        description: '远程别名'
+      })
+      .positional('url', {
+        type: 'string',
+        description: '远程地址 (user@host:/path 或 /local/path, add 时需要)'
+      });
+  }, remote)
 
   .command('manual [command]', '查看命令手册（可指定命令）', (yargs) => {
     yargs
