@@ -145,6 +145,85 @@ const SECTIONS = {
   encryption: () => {
     console.log(chalk.bold.cyan('\n  端到端加密系统'));
 
+    // 2.0
+    console.log(chalk.bold.yellow('\n  一页通：从零到懂'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  别急，先忘掉所有术语。用一段对话讲清楚所有事情。
+
+  ── 第一幕：创建仓库 (lo init) ──
+
+  "我要建一个新仓库。"
+  lo 说："好，我给你造一把钥匙，叫 RepoKey。"
+  "这是什么？"
+  lo 说："这把钥匙用来锁你的笔记。每次写新笔记，都用它加密成乱码。
+         没有这把钥匙，乱码就变不回来。"
+  "钥匙放哪？"
+  lo 说："放在 .repo/keys/repo.key。注意，现在是明文放的，
+         谁拿到这个文件都能开你的笔记。"
+
+  ── 第二幕：上锁 (lo auth add) ──
+
+  "明文放不安全啊。"
+  lo 说："那就上锁。我需要借你的 SSH 私钥用一下。"
+  "怎么用？"
+  lo 说："我不拿走你的私钥。我读一下私钥的内容，算出另一把钥匙，
+         叫 KEK。然后用 KEK 把 RepoKey 加密，加密结果存到
+         .repo/keys/protected_xxx.key，最后删掉明文的 repo.key。"
+  "protect_xxx.key 是什么？"
+  lo 说："就是把 RepoKey 锁在里面的盒子。没有你的 SSH 私钥，
+         谁也打不开这个盒子。"
+  "那我的 SSH 私钥存在盒子里吗？"
+  lo 说："不在。盒子里只存加密后的 RepoKey。解密时需要你的
+         SSH 私钥参与计算，没有私钥就解不出来。"
+
+  ── 第三幕：日常使用 (lo show / lo edit) ──
+
+  "我要看笔记。"
+  lo 说："先证明你是谁。我用你的 SSH 私钥算一把 KEK，
+         用 KEK 打开 protected_xxx.key 盒子，拿到 RepoKey，
+         再用 RepoKey 解密你的笔记。"
+  "这过程快吗？"
+  lo 说："第一次几秒钟。通过之后缓存 15 分钟，
+         这期间再操作就几乎没感觉了。"
+
+  ── 第四幕：另一台电脑 (lo clone / lo pull) ──
+
+  "我在另一台电脑 B 上 clone 了仓库，怎么打不开文件？"
+  lo 说："因为 B 上的 repo.key 是全新随机生成的，和 A 的不一样。
+         A 用它的钥匙锁的门，B 的钥匙打不开。"
+  "那怎么办？"
+   lo 说："需要把 A 的明文 repo.key 安全传到 B 上。具体分两种情况：
+
+          情况一：A 上还没执行过 lo auth add（repo.key 还是明文）
+            1. A 上 scp .repo/keys/repo.key → B 的 .repo/keys/repo.key
+            2. B 上 lo auth add（用自己的 SSH 私钥加密 repo.key）
+            3. A 上 lo auth add（用自己的 SSH 私钥加密 repo.key）
+
+          情况二：A 上已经执行过 lo auth add（repo.key 已删）
+            1. A 上 lo auth remove 恢复明文 repo.key
+            2. scp 传到 B
+            3. A 上重新 lo auth add
+            4. B 上 lo auth add
+
+          最终两台电脑各自有自己的 protected_xxx.key，
+          锁的是同一把 RepoKey，都能解密文件。"
+
+  ── 核心角色速查 ──
+
+  角色          │  是什么           │  类比
+  ──────────────┼──────────────────┼─────────────────
+  RepoKey       │  随机 AES-256 密钥 │  房门钥匙
+  SSH 私钥      │  你的身份凭证     │  你的指纹
+  KEK           │  从 SSH 私钥算出的 │  打开保险柜的钥匙
+  protected.key │  加密后的 RepoKey  │  锁了房门钥匙的保险柜
+  LOEC 密文     │  加密后的笔记     │  锁着的门
+
+  流程：
+  SSH 私钥 → 算出 KEK → 打开 protected.key → 拿到 RepoKey → 解密笔记
+
+  底线：除了你的设备，没有任何地方存着能解密文件的完整信息。`);
+
     // 2.1
     console.log(chalk.bold.yellow('\n  什么是端到端加密'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
@@ -291,10 +370,177 @@ const SECTIONS = {
   │  lo sync   │  解密 → 计算明文散列 → 比较      │
   │  lo backup │  复制文件，排除 .repo/keys/      │
   └────────────┴──────────────────────────────────┘`);
+
+    // 2.7
+    console.log(chalk.bold.yellow('\n  完整机制详解：从 init 到日常读写'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  下面用从头到尾的顺序，完整解释加密机制如何运转。
+
+  ── 阶段一：仓库初始化 (lo init) ──
+
+  1. lo init 执行，调用 crypto.randomBytes(32)
+  2. 生成一把全新的、随机的 256-bit RepoKey
+  3. 将 RepoKey 以明文写入 .repo/keys/repo.key（权限 0o600）
+  4. 此时任何能读取该文件的人都能解密你的笔记
+
+  此时的密钥关系：
+
+      .repo/keys/repo.key (明文, 32字节随机数)
+                │
+                │  直接用于 AES-256-GCM 加密
+                ▼
+          你的笔记文件 ← 加密 → LOEC 密文写入磁盘
+
+  ── 阶段二：绑定 SSH 密钥 (lo auth add) ──
+
+  这是可选但强烈推荐的一步。目的：把明文的 RepoKey 锁起来。
+
+  1. lo auth add -k ~/.ssh/id_ed25519 -l "我的电脑"
+  2. 读取 ~/.ssh/id_ed25519 私钥文件的完整字节内容
+  3. 通过 HKDF-SHA256 从私钥内容派生出 KEK（Key Encryption Key）
+     - 输入：私钥字节 + 随机 Salt + "lo-repo-key-protection-v1" 上下文
+     - 输出：32 字节 KEK
+  4. 用 KEK 通过 AES-256-GCM 加密 RepoKey
+  5. 加密结果写入 .repo/keys/protected_<指纹>.key
+  6. 删除明文的 .repo/keys/repo.key
+
+  此时密钥关系变成：
+
+      你的 SSH 私钥                    RepoKey (AES-256)
+      (~/.ssh/id_ed25519)                    │
+            │                                │
+            ▼                                ▼
+      HKDF-SHA256                      加密你的笔记
+            │
+            ▼
+          KEK ──AES-256-GCM──→ .repo/keys/protected_xxx.key
+                              (加密后的 RepoKey)
+
+  注意：RepoKey 本身没有变，只是换了个存放方式——
+  从"明文放桌上"变成"锁在盒子里，盒子用你的 SSH 私钥打开"。
+
+  ── 阶段三：日常使用 (lo show / lo edit) ──
+
+  每次运行需要解密文件时，触发解锁流程：
+
+  1. 检查会话缓存（15 分钟 TTL，命中直接跳过）
+  2. 读取 .repo/keys/protected_<指纹>.key → 得到加密的 RepoKey
+  3. 读取 SSH 私钥文件内容
+  4. 用相同的 HKDF 参数派生出相同的 KEK
+  5. 用 KEK 解密 protected_xxx.key → 得到 RepoKey（仅存于内存）
+  6. 用 RepoKey 解密资源文件 → 明文内容
+  7. 使用完毕：fill(0) 擦除内存中的 RepoKey
+
+  缓存命中的情况：
+    第一次 lo show → 完整认证流程（约 1-3 秒）
+    15分钟内 lo show / lo edit → 直接使用缓存的 RepoKey（几乎零开销）
+
+  ── 密钥关系总结 ──
+
+  角色          │  名称       │  来源           │  存储位置
+  ──────────────┼────────────┼────────────────┼──────────────────────────
+  数据加密密钥   │  RepoKey   │  随机生成        │  仅内存（或明文 repo.key）
+  密钥保护密钥   │  KEK       │  SSH 私钥派生    │  仅内存（不存储）
+  身份凭证       │  SSH 私钥   │  用户生成        │  ~/.ssh/id_ed25519
+  受保护密钥     │  protected │  KEK 加密 RepoKey │  .repo/keys/protected_xxx.key
+
+  关键事实：
+  - RepoKey 不是从 SSH 私钥派生的，它是独立随机数
+  - SSH 私钥只用于"锁住" RepoKey，不参与文件加解密
+  - 没有 SSH 私钥 → 打不开盒子 → 不能解密文件
+  - 知道了 SSH 私钥 ≠ 知道 RepoKey（必须先解锁 protected_xxx.key）`);
+
+    // 2.8
+    console.log(chalk.bold.yellow('\n  加密与远程同步'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  加密仓库的跨设备同步需要额外处理密钥分发。
+
+  ── 同步过程中文件的状态 ──
+
+  资源文件在传输过程中始终保持 LOEC 加密格式：
+
+    电脑 A                                      电脑 B
+    ──────                                      ──────
+    笔记明文                                    笔记明文
+      │                                            ▲
+      ▼  RepoKey_A 加密                             │  RepoKey_A 解密
+      │                                            │
+    LOEC 密文 ──→ 服务器 ──→ 下载 ──→ LOEC 密文
+      (加密状态不变)                      (同一份密文)
+
+  关键点：资源文件在服务器上、传输过程中始终是加密的。
+  即使服务器被攻破，攻击者也只能拿到密文。
+
+  ── RepoKey 如何传递到另一台设备 ──
+
+  push 时不会自动传输 RepoKey（那样等于给自己加后门）。
+  你需要手动将 RepoKey 安全地传递到第二台设备。
+
+  方法一：通过 SSH 安全复制（推荐）
+    # 在电脑 B 上
+    lo clone user@server:/notes --dest ./notes
+    # 此时 B 的 RepoKey 是随机新生成的，解不开 A 的资源文件
+
+    # 在电脑 A 上，将 repo.key 复制到 B
+    scp .repo/keys/repo.key user@b电脑:~/notes/.repo/keys/repo.key
+
+    # 回到电脑 B，绑定自己的 SSH 密钥保护这把密钥
+    cd notes
+    lo auth add -k ~/.ssh/id_ed25519 -l "电脑B"
+
+  方法二：离线传递
+    1. 在电脑 A 上查看 repo.key：cat .repo/keys/repo.key | base64
+    2. 通过安全渠道（如 Signal/加密邮件）将 base64 发送到 B
+    3. 在电脑 B 上写入：echo "<base64>" | base64 -d > .repo/keys/repo.key
+    4. 在电脑 B 上运行 lo auth add 绑定本地 SSH 密钥
+
+  方法三：两设备共享同一 SSH 密钥
+    如果你的两台电脑使用相同的 SSH 密钥对：
+    - 将 .repo/keys/ 和 .repo/database.sqlite 都复制到电脑 B
+    - lo auth add 已绑定好的 protected_xxx.key 可直接使用
+
+  ── "端到端"在此处的含义 ──
+
+  加密 → 传输 → 解密，中间任何环节（包括服务器）都无法读取明文。
+  这就是"端到端"的含义：只有你的设备（持有密钥的端点）能读写明文。
+
+  ── 多设备密钥管理 ──
+
+  全部设备共享同一把 RepoKey，但各用各的 SSH 密钥保护它：
+
+      .repo/keys/
+        protected_<设备A指纹>.key   ← A 的 KEK 加密的 RepoKey
+        protected_<设备B指纹>.key   ← B 的 KEK 加密的 RepoKey
+
+  各设备用自己的 SSH 私钥解密对应的 protected 文件，
+  得到的是同一把 RepoKey，因此都能加密和解密相同的资源文件。`);
   },
 
   auth: () => {
     console.log(chalk.bold.cyan('\n  SSH 身份认证系统'));
+
+    // 3.0
+    console.log(chalk.bold.yellow('\n  先搞清楚：SSH 在这个项目里到底做什么'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  一句话：SSH 只做一件事——保护 RepoKey 不被别人直接拿走。
+
+  lo 的加密核心是 RepoKey（一个随机 32 字节密钥），文件加解密从头到尾
+  都是它的活。SSH 全程不参与文件加密。
+
+  没有 SSH：RepoKey 明文放 .repo/keys/repo.key
+           → 偷你硬盘的人直接拿走，能解密所有文件
+
+  有 SSH：  RepoKey 被锁进 protected_xxx.key
+           → 偷你硬盘的人拿到也打不开，缺 SSH 私钥
+
+  所以：
+  - SSH 是"门锁"，不是"门"
+  - 只要你有 RepoKey 本身（不管经过 SSH 没），就能解密文件
+  - 安全备份的是 RepoKey，不是 SSH 密钥
+  - 本节的挑战-应答、签名验证等全部是为了安全地取出 RepoKey 而设计的`);
 
     // 3.1
     console.log(chalk.bold.yellow('\n  为什么需要 SSH 认证'));
@@ -528,6 +774,14 @@ const SECTIONS = {
   不同步的数据：
     - database.sqlite（每台设备独立维护，可重建）
     - staging.json（暂存区状态）
+    - repo.key（加密密钥，绝不随 push 上传）
+
+  重要：加密密钥（RepoKey）不参与传输
+  ─────────────────────────────────────────
+    push 只传加密后的文件，不传钥匙。
+    服务器上全是密文，没有解密能力。
+    另一台设备需要你手动安全传递 RepoKey（详见 lo docs encryption 第 2.8 节）。
+    SCP 传输用的是系统 SSH 配置，与 lo auth 管理的密钥是两套独立机制。
 
   操作日志类型：
     resource_created    创建资源（文件 + DB 记录）
@@ -661,7 +915,7 @@ function printIndex() {
   const topics = [
     { id: 'overview',    name: '项目概述',       desc: '核心理念、数据自主、零知识架构' },
     { id: 'concepts',    name: '核心设计观念',   desc: '资源平等、RID 独立性、不可变实体' },
-    { id: 'encryption',  name: '端到端加密系统',  desc: 'AES-256-GCM、LOEC 格式、密钥分层、HKDF' },
+    { id: 'encryption',  name: '端到端加密系统',  desc: 'AES-256-GCM、LOEC格式、密钥分层、HKDF、完整机制、同步中的加密' },
     { id: 'auth',        name: 'SSH 身份认证',    desc: '挑战-应答协议、多设备支持、会话缓存' },
     { id: 'version',     name: '版本控制系统',    desc: '暂存区、提交历史、状态检测' },
     { id: 'database',    name: '数据库与索引',    desc: 'SQLite 表结构、明文散列、加密感知' },
