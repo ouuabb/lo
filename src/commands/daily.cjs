@@ -15,14 +15,7 @@ module.exports = async function daily(argv) {
       weekday: 'long'
     });
 
-    const content = `---
-title: ${dateStr} 日记
-created: ${today}
-tags: ["daily"]
-status: draft
----
-
-# ${dateStr}
+    const content = `# ${dateStr}
 
 ## 今日完成
 

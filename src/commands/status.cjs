@@ -42,6 +42,13 @@ async function status(argv) {
     }
   }
 
+  for (const relPath of stagingStatus.modified) {
+    const absPath = path.join(resourcesDir, relPath);
+    if (await fs.pathExists(absPath) && dbPaths.has(absPath)) {
+      staged.modified.push(relPath);
+    }
+  }
+
   for (const relPath of stagingStatus.deleted) {
     staged.deleted.push(relPath);
   }
@@ -86,7 +93,7 @@ async function status(argv) {
   console.log(chalk.bold('\n工作区状态'));
   console.log('----------------');
 
-  if (stagingStatus.added.length > 0 || stagingStatus.deleted.length > 0 || stagingStatus.renamed.length > 0) {
+  if (stagingStatus.added.length > 0 || stagingStatus.modified.length > 0 || stagingStatus.deleted.length > 0 || stagingStatus.renamed.length > 0) {
     console.log(chalk.cyan('\n暂存区:'));
     
     if (staged.added.length > 0) {
@@ -132,6 +139,7 @@ async function status(argv) {
   }
 
   if (stagingStatus.added.length === 0 && 
+      stagingStatus.modified.length === 0 &&
       stagingStatus.deleted.length === 0 && 
       stagingStatus.renamed.length === 0 &&
       unstaged.modified.length === 0 && 

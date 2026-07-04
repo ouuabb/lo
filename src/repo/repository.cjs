@@ -490,14 +490,15 @@ class Repository {
             });
           }
         } else {
-          const rehashed = await this.resourceService.rehash(existing.rid);
-          if (rehashed.hash !== existing.hash) {
+          const refreshed = await this.resourceService.refresh(existing.rid);
+          if (refreshed.hash !== existing.hash || 
+              JSON.stringify(refreshed.metadata) !== JSON.stringify(existing.metadata)) {
             result.updated.push({
               path: file,
               type: existing.type,
               rid: existing.rid
             });
-            await this.logSync('updated', file, 'hash changed');
+            await this.logSync('updated', file, 'hash or metadata changed');
 
             // 记录操作日志
             if (this.syncOps) {
@@ -505,8 +506,8 @@ class Repository {
               await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_UPDATED, existing.rid, {
                 path: relPath,
                 old_hash: existing.hash,
-                new_hash: rehashed.hash,
-                metadata: rehashed.metadata
+                new_hash: refreshed.hash,
+                metadata: refreshed.metadata
               });
             }
           }
@@ -558,8 +559,8 @@ class Repository {
 
   async commit(message, stagingResult) {
     await this.db.run(
-      'INSERT INTO commits (message, timestamp, added, deleted, renamed) VALUES (?, ?, ?, ?, ?)',
-      [message, Date.now(), stagingResult.added, stagingResult.deleted, stagingResult.renamed]
+      'INSERT INTO commits (message, timestamp, added, updated, deleted, renamed) VALUES (?, ?, ?, ?, ?, ?)',
+      [message, Date.now(), stagingResult.added, stagingResult.updated || 0, stagingResult.deleted, stagingResult.renamed]
     );
   }
 

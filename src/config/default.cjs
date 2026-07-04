@@ -10,14 +10,6 @@ const defaults = {
     pattern: 'YYYY-MM-DD-{slug}.md',
     datePrefix: true
   },
-  frontmatter: {
-    defaults: {
-      status: 'draft',
-      tags: [],
-      created: new Date().toISOString().slice(0, 10)
-    },
-    required: ['title', 'created']
-  },
   index: {
     filename: 'README.md',
     maxRecentNotes: 20,

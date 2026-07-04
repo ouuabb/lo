@@ -36,27 +36,45 @@ class StagingArea {
     });
   }
 
-  async add(filePath) {
+  async add(filePath, repository) {
     const staging = await this._load();
     const relPath = this._relative(filePath);
-    
-    if (!staging.added.includes(relPath)) {
-      staging.added.push(relPath);
+
+    // 检查文件是否已入库（modified）还是新文件（added）
+    let isModified = false;
+    if (repository) {
+      const existing = await repository.resourceService.getByPath(filePath);
+      if (existing) {
+        isModified = true;
+      }
     }
-    
+
+    if (isModified) {
+      if (!staging.modified.includes(relPath)) {
+        staging.modified.push(relPath);
+      }
+      // 同时从 added 中移除（如果之前被错误地标记为 added）
+      const addIdx = staging.added.indexOf(relPath);
+      if (addIdx > -1) staging.added.splice(addIdx, 1);
+    } else {
+      if (!staging.added.includes(relPath)) {
+        staging.added.push(relPath);
+      }
+    }
+
     const idx = staging.deleted.indexOf(relPath);
     if (idx > -1) {
       staging.deleted.splice(idx, 1);
     }
-    
+
     await this._save(staging);
     return relPath;
   }
 
-  async addAll() {
+  async addAll(repository) {
     const staging = await this._load();
-    const existingPaths = new Set(staging.added);
-    
+    const existingPaths = new Set([...staging.added, ...staging.modified]);
+
     const files = await fs.readdir(this.resourcesPath, { recursive: true });
     for (const file of files) {
       const absPath = path.join(this.resourcesPath, file);
@@ -64,48 +82,74 @@ class StagingArea {
       if (stats.isFile()) {
         const relPath = this._relative(absPath);
         if (!existingPaths.has(relPath)) {
-          staging.added.push(relPath);
+          // 逐个调用 add 以正确分类 added/modified
+          await this.add(absPath, repository);
           existingPaths.add(relPath);
         }
       }
     }
-    
-    await this._save(staging);
-    return staging.added.length;
+
+    const updated = await this._load();
+    return updated.added.length + updated.modified.length;
   }
 
   async remove(filePath) {
     const staging = await this._load();
     const relPath = this._relative(filePath);
-    
-    const idx = staging.added.indexOf(relPath);
-    if (idx > -1) {
-      staging.added.splice(idx, 1);
-    }
-    
+
+    const addIdx = staging.added.indexOf(relPath);
+    if (addIdx > -1) staging.added.splice(addIdx, 1);
+
+    const modIdx = staging.modified.indexOf(relPath);
+    if (modIdx > -1) staging.modified.splice(modIdx, 1);
+
     if (!staging.deleted.includes(relPath)) {
       staging.deleted.push(relPath);
     }
-    
+
     await this._save(staging);
     return relPath;
   }
 
+  async rename(oldPath, newPath) {
+    const staging = await this._load();
+    const oldRel = this._relative(oldPath);
+    const newRel = this._relative(newPath);
+
+    // 从其他数组中移除
+    ['added', 'modified', 'deleted'].forEach(key => {
+      const idx = staging[key].indexOf(oldRel);
+      if (idx > -1) staging[key].splice(idx, 1);
+    });
+
+    // 添加重命名记录
+    const existing = staging.renamed.find(r => r.old === oldRel);
+    if (existing) {
+      existing.new = newRel;
+    } else {
+      staging.renamed.push({ old: oldRel, new: newRel });
+    }
+
+    await this._save(staging);
+    return { old: oldRel, new: newRel };
+  }
+
   async reset(filePath = null) {
     const staging = await this._load();
-    
+
     if (filePath) {
       const relPath = this._relative(filePath);
-      const idx = staging.added.indexOf(relPath);
-      if (idx > -1) staging.added.splice(idx, 1);
-      
+      const addIdx = staging.added.indexOf(relPath);
+      if (addIdx > -1) staging.added.splice(addIdx, 1);
+      const modIdx = staging.modified.indexOf(relPath);
+      if (modIdx > -1) staging.modified.splice(modIdx, 1);
       const delIdx = staging.deleted.indexOf(relPath);
       if (delIdx > -1) staging.deleted.splice(delIdx, 1);
     } else {
       await this._clear();
       return null;
     }
-    
+
     await this._save(staging);
     return this._relative(filePath);
   }
@@ -116,9 +160,9 @@ class StagingArea {
 
   async hasChanges() {
     const staging = await this._load();
-    return staging.added.length > 0 || 
-           staging.modified.length > 0 || 
-           staging.deleted.length > 0 || 
+    return staging.added.length > 0 ||
+           staging.modified.length > 0 ||
+           staging.deleted.length > 0 ||
            staging.renamed.length > 0;
   }
 
@@ -131,6 +175,21 @@ class StagingArea {
       if (await fs.pathExists(absPath)) {
         await repository.resourceService.importFile(absPath);
         results.added++;
+      }
+    }
+
+    for (const relPath of staging.modified) {
+      const absPath = path.join(this.resourcesPath, relPath);
+      if (await fs.pathExists(absPath)) {
+        const existing = await repository.resourceService.getByPath(absPath);
+        if (existing) {
+          await repository.resourceService.refresh(existing.rid);
+          results.updated++;
+        } else {
+          // 文件不在库中，降级为 import
+          await repository.resourceService.importFile(absPath);
+          results.added++;
+        }
       }
     }
 

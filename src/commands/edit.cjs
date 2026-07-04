@@ -9,13 +9,13 @@ const config = require('../config/default.cjs');
 
 module.exports = async function edit(argv) {
   const { rid, editor: editorArg } = argv;
-  
+
   try {
     const repo = new Repository(process.cwd());
     await repo.open();
 
     let resource;
-    
+
     if (rid.startsWith('res_')) {
       resource = await repo.getResource(rid);
     } else {
@@ -24,7 +24,7 @@ module.exports = async function edit(argv) {
         resource = await repo.getResourceByPath(path.join(process.cwd(), rid));
       }
     }
-    
+
     if (!resource) {
       await repo.close();
       Logger.error(`资源不存在: ${rid}`);
@@ -83,6 +83,18 @@ module.exports = async function edit(argv) {
         }
       } else {
         Logger.info('编辑完成');
+        // 非加密文件也被编辑器直接修改了，需要同步
+      }
+
+      // 重新打开仓库，同步 metadata 和 hash 到 SQLite
+      try {
+        const repo2 = new Repository(process.cwd());
+        await repo2.open({ skipAuth: true });
+        await repo2.resourceService.refresh(resource.rid);
+        Logger.success(`元数据已同步: ${resource.rid}`);
+        await repo2.close();
+      } catch (e) {
+        Logger.warn(`元数据同步失败: ${e.message}`);
       }
     });
 

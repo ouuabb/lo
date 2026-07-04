@@ -69,7 +69,11 @@ class ResourceService {
   }
 
   async create(resource) {
-    const { type, path: filePath, metadata = {} } = resource;
+    const { type, path: filePath, metadata: callerMeta = {} } = resource;
+
+    // 自动提取元数据（title, wordCount, size, mtime），调用方传入的优先级更高
+    const extracted = await this._extractMetadata(filePath, type);
+    const metadata = { ...extracted, ...callerMeta };
 
     const contentBuffer = await fs.readFile(filePath);
     const CryptoUtils = require('../utils/crypto.cjs');
@@ -273,6 +277,37 @@ class ResourceService {
     }
 
     return resource;
+  }
+
+  async refresh(rid) {
+    const resource = await this.getByRid(rid);
+    if (!resource) {
+      throw new Error('Resource not found');
+    }
+
+    const newMeta = await this._extractMetadata(resource.path, resource.type);
+
+    const rawBuffer = await fs.readFile(resource.path);
+    const CryptoUtils = require('../utils/crypto.cjs');
+    let plaintextBuffer;
+    if (rawBuffer.length >= 4 && rawBuffer.subarray(0, 4).equals(CryptoUtils.MAGIC)) {
+      if (!this._cryptoKey) {
+        throw new Error('文件已加密但无法获取解密密钥');
+      }
+      plaintextBuffer = CryptoUtils.decryptFile(rawBuffer, this._cryptoKey);
+    } else {
+      plaintextBuffer = rawBuffer;
+    }
+    const newHash = HashUtils.fromBuffer(plaintextBuffer);
+
+    const updates = { hash: newHash };
+    // 合并新元数据到现有元数据（保留 tags/status 等手动设置的字段）
+    const merged = { ...resource.metadata, ...newMeta };
+    if (JSON.stringify(merged) !== JSON.stringify(resource.metadata) || newHash !== resource.hash) {
+      updates.metadata = merged;
+    }
+
+    return this.update(rid, updates);
   }
 
   async _extractMetadata(filePath, type) {

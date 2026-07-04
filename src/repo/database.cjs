@@ -101,10 +101,18 @@ class Database {
         message TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         added INTEGER DEFAULT 0,
+        updated INTEGER DEFAULT 0,
         deleted INTEGER DEFAULT 0,
         renamed INTEGER DEFAULT 0
       )
     `);
+
+    // 数据迁移：为已有仓库的 commits 表添加 updated 列
+    try {
+      await this.run('ALTER TABLE commits ADD COLUMN updated INTEGER DEFAULT 0');
+    } catch {
+      // 列已存在，忽略
+    }
 
     // 同步操作日志（用于跨设备同步）
     await this.run(`

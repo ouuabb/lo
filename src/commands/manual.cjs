@@ -41,10 +41,11 @@ const SECTIONS = {
     title: 'new — 创建新资源',
     usage: 'lo new <标题> [--type <类型>] [--tags <标签>] [--category <分类>]',
     description: [
-      '创建新的资源文件并注册到仓库数据库。',
+      '创建新的资源文件并自动注册到仓库数据库。',
       '',
       '文件命名: 生成格式为 YYYY-MM-DD-标题.md 的文件名',
       '存储位置: resources/ 目录（可按分类创建子目录）',
+      '自动注册: 创建文件的同时写入 SQLite 数据库，tags 和 category 立即生效',
       '加密行为: 如果仓库已启用加密，文件自动以 LOEC 格式加密存储',
       '',
       '选项:',
@@ -58,6 +59,8 @@ const SECTIONS = {
       '  lo new "架构图" --type image               # 创建图片资源',
       '  lo new "React笔记" --tags "前端,React"     # 带标签',
       '  lo new "周报" --category weekly            # 放入分类目录',
+      '',
+      '注意: 创建后资源已存在于数据库，lo add 时会识别为"已修改"',
       '',
       '相关命令: lo add, lo commit'
     ]
@@ -140,7 +143,8 @@ const SECTIONS = {
       '  1. 解密文件到临时目录',
       '  2. 打开编辑器编辑临时文件',
       '  3. 编辑完成后重新加密并写回原文件',
-      '  4. 自动更新数据库中的散列值',
+      '  4. 自动调用 refresh() 更新数据库中的散列值和元数据',
+      '     （标题、字数等自动重新提取，标签/状态保留不变）',
       '',
       '选项:',
       '  --editor    指定编辑器命令（如 "code --wait"、"vim"）',
@@ -184,14 +188,15 @@ const SECTIONS = {
       '暂存行为:',
       '  - 指定文件路径：添加单个或多个文件',
       '  - 使用 . ：添加 resources/ 目录下所有支持的文件',
-      '  - 文件被添加到 staging.json 的 added 列表',
+      '  - 新文件（数据库中不存在）→ 加入 added 列表',
+      '  - 已存在文件（数据库中已有记录）→ 加入 modified 列表',
       '',
       '示例:',
       '  lo add "resources/笔记.md"              # 添加单个文件',
       '  lo add "resources/a.md" "resources/b.md" # 添加多个文件',
       '  lo add .                                 # 添加所有文件',
       '',
-      '相关命令: lo commit, lo reset, lo status'
+      '相关命令: lo commit, lo reset, lo status, lo diff'
     ]
   },
 
@@ -203,9 +208,11 @@ const SECTIONS = {
       '',
       '提交流程:',
       '  1. 读取 staging.json 中的暂存内容',
-      '  2. 将新增的文件导入到数据库',
-      '  3. 记录提交信息到 commits 表',
-      '  4. 清空暂存区',
+      '  2. 新增文件 (added) → 导入到数据库',
+      '  3. 修改文件 (modified) → 调用 refresh() 更新散列和元数据',
+      '  4. 删除文件 (deleted) → 标记数据库记录为已删除',
+      '  5. 记录提交信息到 commits 表（含 added/updated/deleted/renamed 数量）',
+      '  6. 清空暂存区',
       '',
       '选项:',
       '  --message, -m    提交信息（必填）',
@@ -242,7 +249,7 @@ const SECTIONS = {
     description: [
       '查看仓库的提交历史记录。',
       '',
-      '输出信息: 提交 ID、时间、提交信息、新增/删除/重命名数量',
+      '输出信息: 提交 ID、时间、提交信息、新增/修改/删除/重命名数量',
       '',
       '选项:',
       '  --limit, -n    显示数量限制（默认: 20）',
@@ -260,10 +267,10 @@ const SECTIONS = {
       '对比文件系统与数据库中的记录，显示工作区的变更状态。',
       '',
       '检测内容:',
-      '  - 新增文件: 文件系统中存在但数据库中没有',
-      '  - 修改文件: 文件的明文散列与数据库记录不一致',
+      '  - 新增文件: 文件系统中存在但数据库中无记录',
+      '  - 修改文件: 文件明文散列与数据库记录不一致（支持暂存/未暂存区分）',
       '  - 删除文件: 数据库中有记录但文件系统中不存在',
-      '  - 暂存状态: 显示当前暂存区中的文件',
+      '  - 暂存状态: 显示暂存区中的 added / modified / deleted / renamed',
       '',
       '加密文件: 检测基于明文 SHA-256 散列，即使多次加密同一内容也能正确识别',
       '',
@@ -275,6 +282,29 @@ const SECTIONS = {
       '  lo status --path ~/notes',
       '',
       '相关命令: lo add, lo commit'
+    ]
+  },
+
+  diff: {
+    title: 'diff — 显示文件变更差异',
+    usage: 'lo diff [路径]',
+    description: [
+      '显示暂存区和未暂存文件的变更差异。',
+      '',
+      '检测内容:',
+      '  - 暂存区新增文件: 显示内容预览',
+      '  - 暂存区修改文件: 显示旧/新散列、元数据变更（标题、字数）',
+      '  - 暂存区删除文件: 显示标题和类型',
+      '  - 未暂存修改文件: 显示散列变更',
+      '  - 未跟踪文件: 列出文件系统中存在但数据库无记录的文件',
+      '',
+      '加密文件: 自动解密后对比明文散列',
+      '',
+      '示例:',
+      '  lo diff                          # 显示所有变更差异',
+      '  lo diff "resources/笔记.md"      # 查看特定文件的差异',
+      '',
+      '相关命令: lo add, lo commit, lo status'
     ]
   },
 
@@ -292,6 +322,24 @@ const SECTIONS = {
       '  lo link res_abc res_xyz --type reference',
       '',
       '相关命令: lo tag'
+    ]
+  },
+
+  rm: {
+    title: 'rm — 暂存文件删除',
+    usage: 'lo rm <路径>',
+    description: [
+      '将文件标记为待删除，添加到暂存区的 deleted 列表。',
+      '',
+      '与 delete 的区别:',
+      '  - lo rm: 暂存删除操作，需配合 lo commit 才能生效',
+      '  - lo delete: 直接对数据库执行删除（跳过暂存区）',
+      '',
+      '示例:',
+      '  lo rm "resources/旧笔记.md"          # 暂存删除',
+      '  lo rm resources/2024-01-01-笔记.md   # 暂存删除',
+      '',
+      '相关命令: lo add, lo commit, lo reset, lo delete'
     ]
   },
 
@@ -770,7 +818,7 @@ function printOverview() {
 
   const categories = [
     { name: '基础命令', cmds: ['init', 'new', 'import', 'list', 'show', 'edit', 'delete'] },
-    { name: '版本控制', cmds: ['add', 'commit', 'reset', 'log', 'status'] },
+    { name: '版本控制', cmds: ['add', 'commit', 'reset', 'diff', 'log', 'status', 'rm'] },
     { name: '资源管理', cmds: ['link', 'move', 'tag', 'sync'] },
     { name: '远程同步', cmds: ['remote', 'push', 'pull', 'clone', 'serve'] },
     { name: '搜索与查询', cmds: ['find', 'stats', 'index'] },

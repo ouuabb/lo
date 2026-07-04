@@ -32,6 +32,8 @@ const log = require('./commands/log.cjs');
 const auth = require('./commands/auth.cjs');
 const remote = require('./commands/remote.cjs');
 const serve = require('./commands/serve.cjs');
+const diff = require('./commands/diff.cjs');
+const rm = require('./commands/rm.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -359,6 +361,14 @@ cli
     });
   }, status)
 
+  .command('diff [path]', '显示文件变更差异', (yargs) => {
+    yargs
+      .positional('path', {
+        type: 'string',
+        description: '指定文件或目录（留空显示所有变更）'
+      });
+  }, diff)
+
   .command('add [path]', '添加文件到暂存区', (yargs) => {
     yargs
       .positional('path', {
@@ -366,6 +376,14 @@ cli
         description: '文件或目录路径，使用 . 添加所有'
       });
   }, add)
+
+  .command('rm [path]', '暂存文件删除', (yargs) => {
+    yargs
+      .positional('path', {
+        type: 'string',
+        description: '要删除的文件路径'
+      });
+  }, rm)
 
   .command('commit', '提交暂存区到仓库', (yargs) => {
     yargs

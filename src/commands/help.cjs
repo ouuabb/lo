@@ -17,8 +17,10 @@ module.exports = function help(argv) {
   console.log('  add           添加文件到暂存区');
   console.log('  commit        提交暂存区');
   console.log('  reset         取消暂存');
+  console.log('  diff          显示文件变更差异');
   console.log('  log           查看提交历史');
   console.log('  status        查看工作区状态');
+  console.log('  rm            暂存文件删除');
 
   console.log('\n' + chalk.bold('远程同步:'));
   console.log('  remote        管理远程仓库别名');

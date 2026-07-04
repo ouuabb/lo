@@ -485,15 +485,7 @@ route('PUT', '/api/notes/:rid', async (req, res, { repo, url }) => {
   }
 
   const updates = {};
-  const { content, metadata, title, tags } = body;
-
-  if (metadata !== undefined) updates.metadata = metadata;
-  if (title !== undefined) {
-    updates.metadata = { ...(updates.metadata || resource.metadata || {}), title };
-  }
-  if (tags !== undefined) {
-    updates.metadata = { ...(updates.metadata || resource.metadata || {}), tags };
-  }
+  const { content } = body;
 
   try {
     if (content !== undefined) {
@@ -507,8 +499,24 @@ route('PUT', '/api/notes/:rid', async (req, res, { repo, url }) => {
         await fs.writeFile(filePath, rawContent, 'utf-8');
       }
 
-      const hash = crypto.createHash('sha256').update(rawContent, 'utf-8').digest('hex');
-      updates.hash = hash;
+      // 使用 refresh() 统一提取标题、词数、hash（自动处理加密/明文）
+      const refreshed = await repo.resourceService.refresh(rid);
+      updates.hash = refreshed.hash;
+      if (!body.metadata && !body.title) {
+        // 未显式传 metadata 时，使用 refresh 提取的结果
+        updates.metadata = refreshed.metadata;
+      }
+    }
+
+    // 用户显式传入的 metadata/title/tags 覆盖 refresh 结果
+    if (body.metadata !== undefined) {
+      updates.metadata = { ...(updates.metadata || resource.metadata || {}), ...body.metadata };
+    }
+    if (body.title !== undefined) {
+      updates.metadata = { ...(updates.metadata || resource.metadata || {}), title: body.title };
+    }
+    if (body.tags !== undefined) {
+      updates.metadata = { ...(updates.metadata || resource.metadata || {}), tags: body.tags };
     }
 
     if (Object.keys(updates).length > 0) {

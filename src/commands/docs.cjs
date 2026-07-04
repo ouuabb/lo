@@ -757,7 +757,9 @@ const SECTIONS = {
   └──────────┘  add  └──────────────┘ commit └──────────┘
 
   命令映射：
-    lo add <文件>       加入暂存区
+    lo add <文件>       加入暂存区（自动区分新增/修改）
+    lo rm <文件>        暂存删除
+    lo diff [文件]      查看变更差异
     lo commit -m <信息>  提交为历史记录
     lo reset [文件]     取消暂存
     lo log              查看提交历史
@@ -767,7 +769,19 @@ const SECTIONS = {
     - id：自增主键
     - message：提交信息
     - timestamp：时间戳
-    - added / deleted / renamed：变更统计
+    - added / updated / deleted / renamed：变更统计
+
+  暂存模型 (staging.json)：
+    - added[]   ：数据库中不存在的全新文件
+    - modified[]：数据库中已有记录、内容已变更的文件
+    - deleted[] ：已暂存待删除的文件
+    - renamed[] ：已暂存的重命名操作
+
+  commit 处理：
+    - added 文件 → 导入数据库（create）
+    - modified 文件 → 调用 refresh() 更新散列和元数据（标题、字数）
+    - deleted 文件 → 标记数据库记录为已删除
+    - renamed 文件 → 更新数据库路径
 
   与 Git 的关系：
     两者可并行使用——Git 管理文件版本，lo 管理元数据和搜索。

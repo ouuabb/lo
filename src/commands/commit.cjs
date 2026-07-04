@@ -5,13 +5,13 @@ const StagingArea = require('../repo/staging.cjs');
 async function commit(argv) {
   const repoPath = process.cwd();
   const message = argv.message || argv.m;
-  
+
   const repo = new Repository(repoPath);
   await repo.open();
-  
+
   const staging = new StagingArea(repoPath);
   const hasChanges = await staging.hasChanges();
-  
+
   if (!hasChanges) {
     console.log(chalk.yellow('\n暂存区为空'));
     await repo.close();
@@ -19,22 +19,27 @@ async function commit(argv) {
   }
 
   const status = await staging.getStatus();
-  
+
   console.log(chalk.bold('\n暂存区内容'));
   console.log('-------------');
-  
+
   if (status.added.length > 0) {
     console.log(chalk.green('\n新增:'));
     status.added.forEach(file => console.log(`  ${file}`));
   }
-  
+
+  if (status.modified.length > 0) {
+    console.log(chalk.blue('\n修改:'));
+    status.modified.forEach(file => console.log(`  ${file}`));
+  }
+
   if (status.deleted.length > 0) {
     console.log(chalk.red('\n删除:'));
     status.deleted.forEach(file => console.log(`  ${file}`));
   }
-  
+
   if (status.renamed.length > 0) {
-    console.log(chalk.blue('\n重命名:'));
+    console.log(chalk.magenta('\n重命名:'));
     status.renamed.forEach(r => console.log(`  ${r.old} -> ${r.new}`));
   }
 
@@ -47,12 +52,13 @@ async function commit(argv) {
 
   const result = await staging.commit(repo);
   await repo.commit(message, result);
-  
+
   console.log(chalk.bold(`\n[提交] ${message}`));
-  console.log(chalk.green(`新增: ${result.added}`));
-  console.log(chalk.red(`删除: ${result.deleted}`));
-  console.log(chalk.blue(`重命名: ${result.renamed}`));
-  
+  if (result.added > 0) console.log(chalk.green(`新增: ${result.added}`));
+  if (result.updated > 0) console.log(chalk.blue(`更新: ${result.updated}`));
+  if (result.deleted > 0) console.log(chalk.red(`删除: ${result.deleted}`));
+  if (result.renamed > 0) console.log(chalk.magenta(`重命名: ${result.renamed}`));
+
   await repo.close();
 }
 

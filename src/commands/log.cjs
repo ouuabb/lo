@@ -40,6 +40,7 @@ async function log(argv) {
     
     const parts = [];
     if (commit.added > 0) parts.push(chalk.green(`+${commit.added}`));
+    if (commit.updated > 0) parts.push(chalk.blue(`~${commit.updated}`));
     if (commit.deleted > 0) parts.push(chalk.red(`-${commit.deleted}`));
     if (commit.renamed > 0) parts.push(chalk.magenta(`~${commit.renamed}`));
     
