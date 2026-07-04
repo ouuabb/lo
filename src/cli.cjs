@@ -23,6 +23,7 @@ const help = require('./commands/help.cjs');
 const importCmd = require('./commands/import.cjs');
 const sync = require('./commands/sync.cjs');
 const manual = require('./commands/manual.cjs');
+const docs = require('./commands/docs.cjs');
 const status = require('./commands/status.cjs');
 const add = require('./commands/add.cjs');
 const commit = require('./commands/commit.cjs');
@@ -281,7 +282,21 @@ cli
       });
   }, sync)
 
-  .command('manual', '查看完整手册', {}, manual)
+  .command('manual [command]', '查看命令手册（可指定命令）', (yargs) => {
+    yargs
+      .positional('command', {
+        type: 'string',
+        description: '要查看的命令名称（如 new, auth, init 等）'
+      });
+  }, manual)
+
+  .command('docs [topic]', '查看项目功能详解（加密、认证等）', (yargs) => {
+    yargs
+      .positional('topic', {
+        type: 'string',
+        description: '查看的主题（encryption, auth, version, database, security, quickstart）'
+      });
+  }, docs)
 
   .command('status', '查看工作区状态', (yargs) => {
     yargs.option('path', {

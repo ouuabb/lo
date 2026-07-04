@@ -13,9 +13,15 @@ module.exports = function help(argv) {
   console.log('  edit          编辑资源');
   console.log('  delete        删除资源');
   
+  console.log('\n' + chalk.bold('版本控制:'));
+  console.log('  add           添加文件到暂存区');
+  console.log('  commit        提交暂存区');
+  console.log('  reset         取消暂存');
+  console.log('  log           查看提交历史');
+  console.log('  status        查看工作区状态');
+  
   console.log('\n' + chalk.bold('资源管理:'));
   console.log('  link          建立资源链接');
-  console.log('  unlink        移除资源链接');
   console.log('  move          移动资源');
   console.log('  tag           管理标签');
   console.log('  sync          同步资源');
@@ -25,11 +31,17 @@ module.exports = function help(argv) {
   console.log('  stats         显示统计信息');
   console.log('  index         生成索引');
   
+  console.log('\n' + chalk.bold('安全:'));
+  console.log('  auth          管理 SSH 身份认证');
+  
   console.log('\n' + chalk.bold('其他:'));
   console.log('  daily         创建今日日记');
   console.log('  backup        备份资源仓库');
   console.log('  config        管理配置');
-  console.log('  manual        查看完整手册');
+  console.log('  help          查看帮助');
+  console.log('  manual        查看命令手册');
+  console.log('  docs          查看功能详解');
   
   console.log('\n' + chalk.gray('使用 lo <command> --help 查看详细帮助'));
+  console.log(chalk.gray('使用 lo manual 查看命令手册  |  lo docs 查看功能详解'));
 };
