@@ -147,12 +147,12 @@ module.exports = async function list(argv) {
 
     if (allResources.length === 0) {
       Logger.info('暂无资源');
-      return;
+      process.exit(0);
     }
     
     if (format === 'json') {
       console.log(JSON.stringify(allResources, null, 2));
-      return;
+      process.exit(0);
     }
     
     const getStatusLabel = (status) => {
@@ -173,6 +173,8 @@ module.exports = async function list(argv) {
       const statusLabel = getStatusLabel(resource._status);
       console.log(`${statusLabel} ${title} ${chalk.gray(date)}`);
     });
+    
+    process.exit(0);
     
   } catch (error) {
     Logger.error(`获取资源列表失败: ${error.message}`);

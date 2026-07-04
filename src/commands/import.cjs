@@ -30,6 +30,8 @@ module.exports = async function importCmd(argv) {
 
     await repo.close();
 
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`导入失败: ${error.message}`);
     process.exit(1);

@@ -18,7 +18,8 @@ async function diff(argv) {
 
   // 暂存区变更
   if (stagingStatus.added.length > 0 || stagingStatus.modified.length > 0 ||
-      stagingStatus.deleted.length > 0 || stagingStatus.renamed.length > 0) {
+      stagingStatus.deleted.length > 0 || stagingStatus.renamed.length > 0 ||
+      (stagingStatus.metadata && stagingStatus.metadata.length > 0)) {
     console.log(chalk.bold('\n暂存区变更'));
     console.log('----------');
 
@@ -77,6 +78,25 @@ async function diff(argv) {
     for (const rename of stagingStatus.renamed) {
       console.log(chalk.magenta(`\n[重命名] ${rename.old} -> ${rename.new}`));
     }
+
+    if (stagingStatus.metadata && stagingStatus.metadata.length > 0) {
+      for (const meta of stagingStatus.metadata) {
+        const resource = await repo.resourceService.getByRid(meta.rid);
+        console.log(chalk.yellow(`\n[元数据] ${meta.rid}`));
+        if (resource) {
+          if (meta.tags) {
+            const oldTags = (resource.metadata.tags || []).join(', ') || '(无)';
+            console.log(chalk.gray(`  tags: "${oldTags}" -> "[${meta.tags.join(', ')}]"`));
+          }
+          if (meta.status && meta.status !== resource.metadata.status) {
+            console.log(chalk.gray(`  status: "${resource.metadata.status || ''}" -> "${meta.status}"`));
+          }
+          if (meta.category && meta.category !== resource.metadata.category) {
+            console.log(chalk.gray(`  category: "${resource.metadata.category || ''}" -> "${meta.category}"`));
+          }
+        }
+      }
+    }
   }
 
   // 未暂存的变更
@@ -115,11 +135,13 @@ async function diff(argv) {
   }
 
   if (unstagedCount === 0 && stagingStatus.added.length === 0 &&
-      stagingStatus.modified.length === 0 && stagingStatus.deleted.length === 0) {
+      stagingStatus.modified.length === 0 && stagingStatus.deleted.length === 0 &&
+      (!stagingStatus.metadata || stagingStatus.metadata.length === 0)) {
     console.log(chalk.gray('  无变更'));
   }
 
   await repo.close();
+  process.exit(0);
 }
 
 async function computeHash(rawBuffer, repo) {

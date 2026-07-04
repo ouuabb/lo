@@ -12,6 +12,7 @@ const edit = require('./commands/edit.cjs');
 const deleteResource = require('./commands/delete.cjs');
 const index = require('./commands/index.cjs');
 const tag = require('./commands/tag.cjs');
+const category = require('./commands/category.cjs');
 const find = require('./commands/find.cjs');
 const stats = require('./commands/stats.cjs');
 const link = require('./commands/link.cjs');
@@ -44,7 +45,8 @@ const cli = yargs
   .example('$0 find "分布式"', '搜索资源')
   .help()
   .alias('h', 'help')
-  .alias('v', 'version');
+  .alias('v', 'version')
+  .strict();
 
 cli
   .command('init', '初始化资源仓库', (yargs) => {
@@ -180,6 +182,22 @@ cli
         description: '资源 RID 或文件路径'
       });
   }, tag)
+
+  .command('category <action> <rid> [category]', '管理分类', (yargs) => {
+    yargs
+      .positional('action', {
+        type: 'string',
+        choices: ['set', 'rm', 'list']
+      })
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID 或文件路径'
+      })
+      .positional('category', {
+        type: 'string',
+        description: '分类名称'
+      });
+  }, category)
 
   .command('find <query>', '搜索资源', (yargs) => {
     yargs

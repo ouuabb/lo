@@ -52,6 +52,8 @@ module.exports = async function index(argv) {
 
     Logger.success(`索引已生成: ${indexPath}`);
 
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`生成索引失败: ${error.message}`);
     process.exit(1);

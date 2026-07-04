@@ -247,6 +247,11 @@ class ResourceService {
     return this.update(rid, { path: newPath });
   }
 
+  // 仅更新 DB 路径，不移动磁盘文件（用于 sync 检测到重命名时文件已在目标位置）
+  async updatePath(rid, newPath) {
+    return this.update(rid, { path: newPath });
+  }
+
   async rehash(rid) {
     const resource = await this.getByRid(rid);
     if (!resource) {

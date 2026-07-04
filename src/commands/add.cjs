@@ -73,6 +73,7 @@ async function add(argv) {
   }
 
   await repo.close();
+  process.exit(0);
 }
 
 module.exports = add;

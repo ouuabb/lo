@@ -34,6 +34,8 @@ module.exports = async function move(argv) {
     
     await repo.close();
     
+    process.exit(0);
+    
   } catch (error) {
     Logger.error(`移动资源失败: ${error.message}`);
     process.exit(1);

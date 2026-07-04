@@ -46,6 +46,8 @@ module.exports = async function daily(argv) {
 
     await repo.close();
 
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`创建日记失败: ${error.message}`);
     process.exit(1);

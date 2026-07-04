@@ -87,7 +87,66 @@ const SECTIONS = {
     console.log(chalk.bold.yellow('\n  二、RID 唯一且独立 —— 标识符是纯粹的'));
     console.log(`
   每个资源在创建时被分配一个 RID（Resource Identifier，资源标识符），
-  格式为 "res_" 前缀 + 随机字符串，例如 "res_a1b2c3d4e5"。
+  格式为 "res_" 前缀 + 12 位十六进制随机字符串，例如 "res_a1b2c3d4e5f6"。
+
+  RID 是如何生成并与文件绑定的：
+ 
+   1. 用户执行 lo new / lo import / API 创建等操作
+   2. resourceService.create() 调用 crypto.randomBytes(12)
+      → 生成 12 字节随机数，转为 24 字符的十六进制串
+      → 加上 "res_" 前缀构成完整 RID
+   3. INSERT INTO resources (rid, path, type, hash,
+      metadata, encrypted, deleted) VALUES (...)
+      → RID 和文件路径写入 resources 表的同一条记录
+   4. 此后，通过 RID 查 resources 表即可获得文件路径
+      → lo show res_xxx → SELECT path FROM resources → 读文件
+
+  系统也能自动检测未入库文件 lo sync：
+ 
+   lo status         仅检测和报告未跟踪文件，不生成 RID
+   lo sync           扫描 resources/ 目录，自动为未入库文件调用
+                     resourceService.importFile() 生成 RID 并入库
+
+  lo sync 和 lo add / lo commit 的关系：
+
+  两种方式都能让文件入库，区别在于：
+
+  lo sync                     lo add + lo commit
+  ──────────────────────────  ──────────────────────────
+  自动扫描整个目录             手动指定文件
+  直接入库，不走暂存区         先暂存，审查后再提交
+  适合批量导入、定时同步        适合日常编辑、精确控制
+  两条路径最终写入的是同一张 resources 表，RID 和 hash 的生成逻辑完全一致。
+    对 resources 表而言，lo sync 和 lo add + lo commit 的结果完全等价。
+    唯一区别：sync 不写 commits 表，lo log 看不到 sync 的变更记录。
+
+  文件入库后的四种用户操作及后果：
+
+  1. 在编辑器里修改文件内容
+     → lo status 显示文件在"未暂存修改"中
+     → lo add <文件> 将其加入暂存区
+     → lo commit 提交后，DB 中的 hash 和元数据（标题、字数）更新为新值
+     → 旧的 hash 值保留在提交历史中，可通过 lo log 回溯
+     注意：不 add/commit 的话，DB 记录的仍是旧 hash，但这不影响你
+           看文件内容（内容来自磁盘），只影响 hash 比对
+
+  2. 使用 lo tag / lo category 修改元数据
+      → lo tag add/rm 和 lo category set/rm 将变更写入暂存区（而非直接写 DB）
+      → lo status 在暂存区显示元数据变更（标签和分类）
+      → lo commit 提交后，变更合入 SQLite，写入提交历史
+      → 和修改内容一样走完整的暂存 → commit 工作流
+
+  3. 重命名或移动文件
+      → lo status 自动匹配 hash 识别为重命名：用旧路径的 DB hash 对比新路径的文件 hash，一致即判定为同一文件
+      → 新路径显示在"重命名"中并保留 RID，不会丢失身份
+      → lo add + lo commit 后提交历史记录此次重命名
+      → lo sync 同样自动处理，无需手动操作
+
+  4. 从磁盘删除文件
+     → lo status 显示在"未暂存删除"中
+     → lo rm <文件> 将其加入暂存区
+     → lo commit 提交后，DB 中该记录标记为 deleted
+     → 软删除，DB 记录仍在，只是不再出现在常规查询中
 
   RID 的核心特性：
 
@@ -114,8 +173,8 @@ const SECTIONS = {
      - 路径是元数据，不是身份
 
   5. RID 为什么不能与文件名绑定
-     - 两个资源可以有相同文件名但内容不同
-     - 文件名可随时修改
+     - 文件名可随时修改（RID 需要不可变的身份标识）
+     - 不同子目录下可以有同名文件（如 notes/readme.md 和 projects/readme.md）
 
   6. 跨设备同步中的 RID
      操作日志在同步时携带 RID，接收方原样记录。
@@ -757,31 +816,35 @@ const SECTIONS = {
   └──────────┘  add  └──────────────┘ commit └──────────┘
 
   命令映射：
-    lo add <文件>       加入暂存区（自动区分新增/修改）
-    lo rm <文件>        暂存删除
-    lo diff [文件]      查看变更差异
-    lo commit -m <信息>  提交为历史记录
-    lo reset [文件]     取消暂存
-    lo log              查看提交历史
-    lo status           查看变更状态
+    lo add <文件>         加入暂存区（自动区分新增/修改）
+    lo rm <文件>          暂存删除
+    lo diff [文件]        查看变更差异
+    lo commit -m <信息>   提交为历史记录
+    lo reset [文件]       取消暂存
+    lo log                查看提交历史
+    lo status             查看变更状态
+    lo tag add/rm <rid>   暂存标签变更
+    lo category set/rm <rid>  暂存分类变更
 
   commits 表结构：
     - id：自增主键
     - message：提交信息
     - timestamp：时间戳
-    - added / updated / deleted / renamed：变更统计
+    - added / updated / deleted / renamed / metadata：变更统计
 
   暂存模型 (staging.json)：
     - added[]   ：数据库中不存在的全新文件
     - modified[]：数据库中已有记录、内容已变更的文件
     - deleted[] ：已暂存待删除的文件
     - renamed[] ：已暂存的重命名操作
+    - metadata[]：已暂存的元数据变更（标签、分类、状态）
 
   commit 处理：
     - added 文件 → 导入数据库（create）
     - modified 文件 → 调用 refresh() 更新散列和元数据（标题、字数）
     - deleted 文件 → 标记数据库记录为已删除
     - renamed 文件 → 更新数据库路径
+    - metadata 变更 → 合并到数据库 metadata 列
 
   与 Git 的关系：
     两者可并行使用——Git 管理文件版本，lo 管理元数据和搜索。
@@ -1279,11 +1342,12 @@ module.exports = function docs(argv) {
     if (topic) {
       console.log(chalk.red(`\n  未找到主题: ${topic}`));
       console.log(chalk.gray('  运行 lo docs 查看所有可用主题'));
-      return;
+      process.exit(0);
     }
     printIndex();
-    return;
+    process.exit(0);
   }
 
   SECTIONS[resolved]();
+  process.exit(0);
 };

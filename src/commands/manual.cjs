@@ -211,8 +211,9 @@ const SECTIONS = {
       '  2. 新增文件 (added) → 导入到数据库',
       '  3. 修改文件 (modified) → 调用 refresh() 更新散列和元数据',
       '  4. 删除文件 (deleted) → 标记数据库记录为已删除',
-      '  5. 记录提交信息到 commits 表（含 added/updated/deleted/renamed 数量）',
-      '  6. 清空暂存区',
+      '  5. 元数据变更 (metadata) → 合并到数据库 metadata 列',
+      '  6. 记录提交信息到 commits 表（含 added/updated/deleted/renamed/metadata 数量）',
+      '  7. 清空暂存区',
       '',
       '选项:',
       '  --message, -m    提交信息（必填）',
@@ -249,7 +250,7 @@ const SECTIONS = {
     description: [
       '查看仓库的提交历史记录。',
       '',
-      '输出信息: 提交 ID、时间、提交信息、新增/修改/删除/重命名数量',
+      '输出信息: 提交 ID、时间、提交信息、新增/修改/删除/重命名/元数据数量',
       '',
       '选项:',
       '  --limit, -n    显示数量限制（默认: 20）',
@@ -269,8 +270,9 @@ const SECTIONS = {
       '检测内容:',
       '  - 新增文件: 文件系统中存在但数据库中无记录',
       '  - 修改文件: 文件明文散列与数据库记录不一致（支持暂存/未暂存区分）',
+      '  - 重命名: 自动匹配"删除"和"新增"的 hash，识别为同一文件',
       '  - 删除文件: 数据库中有记录但文件系统中不存在',
-      '  - 暂存状态: 显示暂存区中的 added / modified / deleted / renamed',
+      '  - 暂存状态: 显示暂存区中的 added / modified / deleted / renamed / metadata',
       '',
       '加密文件: 检测基于明文 SHA-256 散列，即使多次加密同一内容也能正确识别',
       '',
@@ -361,16 +363,41 @@ const SECTIONS = {
     description: [
       '对资源进行标签的添加、移除和查询操作。',
       '',
+      '标签变更走暂存区工作流，添加/移除后需 lo commit 提交才生效。',
+      '多次操作会累积在暂存区，lo tag list 会显示暂存中未提交的变更。',
+      '',
       '操作:',
-      '  add     添加一个或多个标签',
-      '  rm      移除指定标签',
-      '  list    列出资源的所有标签',
+      '  add     暂存标签添加（需 commit）',
+      '  rm      暂存标签移除（需 commit）',
+      '  list    列出资源的所有标签（含暂存提示）',
       '',
       '示例:',
-      '  lo tag add res_abc "前端"                     # 添加标签',
-      '  lo tag add res_abc "前端,React"               # 添加多个标签',
-      '  lo tag rm res_abc "前端"                      # 移除标签',
-      '  lo tag list res_abc                           # 列出所有标签'
+      '  lo tag add res_abc "前端"                       # 暂存标签添加',
+      '  lo tag rm res_abc "前端"                        # 暂存标签移除',
+      '  lo tag list res_abc                             # 列出所有标签',
+      '  lo commit -m "更新标签"                          # 提交元数据变更',
+    ]
+  },
+
+  category: {
+    title: 'category — 管理分类',
+    usage: 'lo category <set|rm|list> <rid|路径> [分类名]',
+    description: [
+      '对资源进行分类的设置、移除和查询操作。',
+      '',
+      '分类变更走暂存区工作流，设置/移除后需 lo commit 提交才生效。',
+      '分类是单值字段，每个资源只有一个分类，set 会覆盖已有值。',
+      '',
+      '操作:',
+      '  set     暂存分类设置（需 commit）',
+      '  rm      暂存分类移除（需 commit）',
+      '  list    查看资源当前分类（含暂存提示）',
+      '',
+      '示例:',
+      '  lo category set res_abc weekly                  # 暂存分类设置',
+      '  lo category rm res_abc                          # 暂存分类移除',
+      '  lo category list res_abc                        # 查看当前分类',
+      '  lo commit -m "更新分类"                          # 提交元数据变更',
     ]
   },
 
@@ -379,6 +406,11 @@ const SECTIONS = {
     usage: 'lo sync [--full] [--quiet]',
     description: [
       '扫描文件系统，将变更同步到数据库。',
+      '',
+      'lo sync 和 lo add + lo commit 对 resources 表的结果完全等价：',
+      '新文件都会获得 RID 并入库，修改的文件都会更新 hash，',
+      '删除的文件都会标记。区别在于 sync 不写 commits 表，',
+      '因此 lo log 看不到 sync 的变更记录。',
       '',
       '扫描范围: resources/ 目录下所有支持的文件',
       '同步策略:',
@@ -389,6 +421,7 @@ const SECTIONS = {
       '检测内容:',
       '  - 新文件: 自动导入到数据库',
       '  - 修改文件: 更新数据库中对应的散列值',
+      '  - 重命名: 匹配删除和新增的 hash，自动识别并保留 RID',
       '  - 删除文件: 标记数据库记录为已删除',
       '',
       '选项:',
@@ -819,7 +852,7 @@ function printOverview() {
   const categories = [
     { name: '基础命令', cmds: ['init', 'new', 'import', 'list', 'show', 'edit', 'delete'] },
     { name: '版本控制', cmds: ['add', 'commit', 'reset', 'diff', 'log', 'status', 'rm'] },
-    { name: '资源管理', cmds: ['link', 'move', 'tag', 'sync'] },
+    { name: '资源管理', cmds: ['link', 'move', 'tag', 'category', 'sync'] },
     { name: '远程同步', cmds: ['remote', 'push', 'pull', 'clone', 'serve'] },
     { name: '搜索与查询', cmds: ['find', 'stats', 'index'] },
     { name: '安全', cmds: ['auth'] },
@@ -847,11 +880,12 @@ module.exports = function manual(argv) {
     if (cmd) {
       console.log(chalk.red(`\n  未找到命令: ${cmd}`));
       console.log(chalk.gray('  运行 lo manual 查看所有支持的命令'));
-      return;
+      process.exit(0);
     }
     printOverview();
-    return;
+    process.exit(0);
   }
 
   printSection(SECTIONS[cmd]);
+  process.exit(0);
 };

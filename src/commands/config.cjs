@@ -69,6 +69,8 @@ module.exports = async function configCmd(argv) {
         break;
     }
     
+    process.exit(0);
+    
   } catch (error) {
     Logger.error(`配置操作失败: ${error.message}`);
     process.exit(1);

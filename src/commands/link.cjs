@@ -46,6 +46,8 @@ module.exports = async function link(argv) {
     
     await repo.close();
     
+    process.exit(0);
+    
   } catch (error) {
     Logger.error(`建立链接失败: ${error.message}`);
     process.exit(1);

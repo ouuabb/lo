@@ -43,6 +43,17 @@ async function commit(argv) {
     status.renamed.forEach(r => console.log(`  ${r.old} -> ${r.new}`));
   }
 
+  if (status.metadata && status.metadata.length > 0) {
+    console.log(chalk.yellow('\n元数据:'));
+    status.metadata.forEach(m => {
+      const changes = [];
+      if (m.tags) changes.push(`tags: [${m.tags.join(', ')}]`);
+      if (m.status) changes.push(`status: ${m.status}`);
+      if (m.category) changes.push(`category: ${m.category}`);
+      console.log(`  ${m.rid}  ${changes.join(', ')}`);
+    });
+  }
+
   if (!message) {
     console.log(chalk.red('\n请提供提交信息'));
     console.log(chalk.gray('使用: lo commit -m "提交信息"'));
@@ -58,8 +69,10 @@ async function commit(argv) {
   if (result.updated > 0) console.log(chalk.blue(`更新: ${result.updated}`));
   if (result.deleted > 0) console.log(chalk.red(`删除: ${result.deleted}`));
   if (result.renamed > 0) console.log(chalk.magenta(`重命名: ${result.renamed}`));
+  if (result.metadata > 0) console.log(chalk.yellow(`元数据: ${result.metadata}`));
 
   await repo.close();
+  process.exit(0);
 }
 
 module.exports = commit;

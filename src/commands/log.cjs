@@ -43,6 +43,7 @@ async function log(argv) {
     if (commit.updated > 0) parts.push(chalk.blue(`~${commit.updated}`));
     if (commit.deleted > 0) parts.push(chalk.red(`-${commit.deleted}`));
     if (commit.renamed > 0) parts.push(chalk.magenta(`~${commit.renamed}`));
+    if (commit.metadata > 0) parts.push(chalk.yellow(`M${commit.metadata}`));
     
     if (parts.length > 0) {
       console.log(`  ${parts.join(' ')}`);
@@ -50,6 +51,7 @@ async function log(argv) {
   }
   
   await repo.close();
+  process.exit(0);
 }
 
 module.exports = log;

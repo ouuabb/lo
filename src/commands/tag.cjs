@@ -1,6 +1,7 @@
 const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
+const StagingArea = require('../repo/staging.cjs');
 
 module.exports = async function tag(argv) {
   const { action, rid, tag } = argv;
@@ -25,8 +26,8 @@ module.exports = async function tag(argv) {
       process.exit(1);
     }
 
-    const currentTags = resource.metadata.tags || [];
-    let updatedTags;
+    const staging = new StagingArea(repo.repoPath);
+    const stagingStatus = await staging.getStatus();
 
     switch (action) {
       case 'add':
@@ -34,14 +35,18 @@ module.exports = async function tag(argv) {
           Logger.error('请指定标签名称');
           process.exit(1);
         }
-        if (currentTags.includes(tag)) {
-          Logger.info(`标签 "${tag}" 已存在`);
-        } else {
-          updatedTags = [...currentTags, tag];
-          await repo.updateResource(resource.rid, {
-            metadata: { ...resource.metadata, tags: updatedTags }
-          });
-          Logger.success(`已添加标签: ${tag}`);
+        {
+          // 获取基准标签：优先看暂存区已有变更，其次看数据库
+          const stagedMeta = (stagingStatus.metadata || []).find(m => m.rid === resource.rid);
+          const baseTags = stagedMeta && stagedMeta.tags ? stagedMeta.tags : (resource.metadata.tags || []);
+          
+          if (baseTags.includes(tag)) {
+            Logger.info(`标签 "${tag}" 已存在`);
+          } else {
+            const newTags = [...baseTags, tag];
+            await staging.stageMetadata(resource.rid, { tags: newTags });
+            Logger.success(`已暂存标签变更: +"${tag}"（需 lo commit 提交）`);
+          }
         }
         break;
         
@@ -50,26 +55,42 @@ module.exports = async function tag(argv) {
           Logger.error('请指定标签名称');
           process.exit(1);
         }
-        updatedTags = currentTags.filter(t => t !== tag);
-        await repo.updateResource(resource.rid, {
-          metadata: { ...resource.metadata, tags: updatedTags }
-        });
-        Logger.success(`已移除标签: ${tag}`);
+        {
+          const stagedMeta = (stagingStatus.metadata || []).find(m => m.rid === resource.rid);
+          const baseTags = stagedMeta && stagedMeta.tags ? stagedMeta.tags : (resource.metadata.tags || []);
+          
+          if (!baseTags.includes(tag)) {
+            Logger.info(`标签 "${tag}" 不存在`);
+          } else {
+            const newTags = baseTags.filter(t => t !== tag);
+            await staging.stageMetadata(resource.rid, { tags: newTags });
+            Logger.success(`已暂存标签变更: -"${tag}"（需 lo commit 提交）`);
+          }
+        }
         break;
         
       case 'list':
         Logger.title(`资源 "${resource.metadata.title || '未命名'}" 的标签`);
-        if (currentTags.length === 0) {
+        const showTags = resource.metadata.tags || [];
+        if (showTags.length === 0) {
           Logger.info('暂无标签');
         } else {
-          currentTags.forEach((t, i) => {
+          showTags.forEach((t, i) => {
             console.log(`${i + 1}. ${t}`);
           });
+        }
+        // 检查是否有暂存的标签变更
+        const pendingMeta = (stagingStatus.metadata || []).find(m => m.rid === resource.rid);
+        if (pendingMeta && pendingMeta.tags) {
+          console.log();
+          Logger.warn(`暂存区有未提交的标签变更: [${pendingMeta.tags.join(', ')}]`);
         }
         break;
     }
     
     await repo.close();
+    
+    process.exit(0);
     
   } catch (error) {
     Logger.error(`标签操作失败: ${error.message}`);

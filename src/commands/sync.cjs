@@ -71,6 +71,8 @@ async function localSync(argv) {
 
     Logger.success(`同步完成，共处理 ${result.total} 个资源`);
   }
+
+  process.exit(0);
 }
 
 async function push(argv) {
@@ -131,6 +133,8 @@ async function push(argv) {
     // 提示远程用户执行 pull（如果用了别名，显示别名；否则显示地址）
     Logger.info(chalk.gray('\n在另一台设备上运行以完成同步:'));
     Logger.info(chalk.cyan(`  lo pull ${remote}`));
+
+    process.exit(0);
 
   } catch (error) {
     Logger.error(`推送失败: ${error.message}`);
@@ -212,6 +216,8 @@ async function pull(argv) {
     }
 
     Logger.success('拉取完成');
+
+    process.exit(0);
 
   } catch (error) {
     Logger.error(`拉取失败: ${error.message}`);
@@ -337,6 +343,8 @@ async function clone(argv) {
     if (results.conflicts.length > 0) {
       Logger.warn(`检测到 ${results.conflicts.length} 个冲突，请手动处理`);
     }
+
+    process.exit(0);
 
   } catch (error) {
     Logger.error(`克隆失败: ${error.message}`);

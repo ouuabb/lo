@@ -38,6 +38,7 @@ async function reset(argv) {
   }
   
   await repo.close();
+  process.exit(0);
 }
 
 module.exports = reset;

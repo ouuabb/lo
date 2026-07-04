@@ -58,6 +58,8 @@ module.exports = async function show(argv) {
 
     await repo.close();
 
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`查看资源失败: ${error.message}`);
     process.exit(1);

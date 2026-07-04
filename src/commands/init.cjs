@@ -54,4 +54,5 @@ module.exports = async function init(argv) {
     Logger.error(`初始化失败: ${error.message}`);
     process.exit(1);
   }
+  process.exit(0);
 };

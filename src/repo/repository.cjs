@@ -438,6 +438,7 @@ class Repository {
       added: [],
       deleted: [],
       updated: [],
+      renamed: [],
       skipped: [],
       total: 0
     };
@@ -452,6 +453,12 @@ class Repository {
       nodir: true
     });
 
+    const dbResources = await this.resourceService.getAll();
+    const dbByPath = new Map(dbResources.map(r => [r.path, r]));
+
+    // 第一阶段：处理路径匹配的文件（刷新已存在的），收集"疑似新增"文件
+    const newFileCandidates = [];
+
     for (const file of files) {
       try {
         if (!ResourceType.isSupported(file)) {
@@ -465,33 +472,14 @@ class Repository {
           continue;
         }
 
-        const existing = await this.resourceService.getByPath(file);
-        
-        if (!existing) {
-          const resource = await this.resourceService.importFile(file);
-          result.added.push({
-            path: file,
-            type: resource.type,
-            rid: resource.rid
-          });
-          await this.logSync('added', file, resource.type);
+        const existing = dbByPath.get(file);
 
-          // 记录操作日志
-          if (this.syncOps) {
-            const relPath = path.relative(this.repoPath, file);
-            await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
-              type: resource.type,
-              path: relPath,
-              hash: resource.hash,
-              metadata: resource.metadata,
-              encrypted: resource.encrypted,
-              created: resource.created,
-              updated: resource.updated
-            });
-          }
+        if (!existing) {
+          // 路径不在 DB 中，暂不处理，稍后与"疑似删除"做 hash 匹配
+          newFileCandidates.push(file);
         } else {
           const refreshed = await this.resourceService.refresh(existing.rid);
-          if (refreshed.hash !== existing.hash || 
+          if (refreshed.hash !== existing.hash ||
               JSON.stringify(refreshed.metadata) !== JSON.stringify(existing.metadata)) {
             result.updated.push({
               path: file,
@@ -500,7 +488,6 @@ class Repository {
             });
             await this.logSync('updated', file, 'hash or metadata changed');
 
-            // 记录操作日志
             if (this.syncOps) {
               const relPath = path.relative(this.repoPath, file);
               await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_UPDATED, existing.rid, {
@@ -520,47 +507,115 @@ class Repository {
       }
     }
 
-    const dbResources = await this.resourceService.getAll();
+    // 收集"疑似删除"的 DB 记录（路径在磁盘上不存在）
+    const deletedCandidates = [];
     for (const resource of dbResources) {
-      try {
-        if (!await fs.pathExists(resource.path)) {
-          await this.resourceService.delete(resource.rid, true);
-          result.deleted.push({
-            path: resource.path,
-            type: resource.type,
-            rid: resource.rid
-          });
-          await this.logSync('deleted', resource.path, 'file not found');
+      if (!await fs.pathExists(resource.path)) {
+        deletedCandidates.push(resource);
+      }
+    }
 
-          // 记录操作日志
+    // 第二阶段：匹配"疑似删除"和"疑似新增"的 hash，检测重命名
+    const HashUtils = require('../utils/hash.cjs');
+    const newFileHashes = new Map();
+    for (const file of newFileCandidates) {
+      try {
+        newFileHashes.set(file, await HashUtils.fromFile(file, this._cryptoKey));
+      } catch (e) {
+        result.skipped.push({ path: file, error: e.message });
+      }
+    }
+
+    const matchedNewPaths = new Set();
+    for (const deletedResource of deletedCandidates) {
+      let matched = false;
+      for (const [newFile, newHash] of newFileHashes) {
+        if (matchedNewPaths.has(newFile)) continue;
+        if (newHash === deletedResource.hash) {
+          // 重命名：更新路径，RID 不变
+          await this.resourceService.updatePath(deletedResource.rid, newFile);
+          result.renamed.push({
+            oldPath: deletedResource.path,
+            newPath: newFile,
+            rid: deletedResource.rid
+          });
+          await this.logSync('renamed', `${deletedResource.path} -> ${newFile}`, 'hash matched');
+
           if (this.syncOps) {
-            const relPath = path.relative(this.repoPath, resource.path);
-            await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_DELETED, resource.rid, {
-              path: relPath,
-              type: resource.type,
-              hash: resource.hash
+            const oldRel = path.relative(this.repoPath, deletedResource.path);
+            const newRel = path.relative(this.repoPath, newFile);
+            await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_MOVED, deletedResource.rid, {
+              old_path: oldRel,
+              new_path: newRel
             });
           }
+          matchedNewPaths.add(newFile);
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched) {
+        // 真正的删除
+        await this.resourceService.delete(deletedResource.rid, true);
+        result.deleted.push({
+          path: deletedResource.path,
+          type: deletedResource.type,
+          rid: deletedResource.rid
+        });
+        await this.logSync('deleted', deletedResource.path, 'file not found');
+
+        if (this.syncOps) {
+          const relPath = path.relative(this.repoPath, deletedResource.path);
+          await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_DELETED, deletedResource.rid, {
+            path: relPath,
+            type: deletedResource.type,
+            hash: deletedResource.hash
+          });
+        }
+      }
+    }
+
+    // 未被匹配的新文件 → 真正的新增
+    for (const [newFile, newHash] of newFileHashes) {
+      if (matchedNewPaths.has(newFile)) continue;
+      try {
+        const resource = await this.resourceService.importFile(newFile);
+        result.added.push({
+          path: newFile,
+          type: resource.type,
+          rid: resource.rid
+        });
+        await this.logSync('added', newFile, resource.type);
+
+        if (this.syncOps) {
+          const relPath = path.relative(this.repoPath, newFile);
+          await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+            type: resource.type,
+            path: relPath,
+            hash: resource.hash,
+            metadata: resource.metadata,
+            encrypted: resource.encrypted,
+            created: resource.created,
+            updated: resource.updated
+          });
         }
       } catch (e) {
-        result.skipped.push({
-          path: resource.path,
-          error: e.message
-        });
+        result.skipped.push({ path: newFile, error: e.message });
       }
     }
 
     await this.setLastSyncTime(currentTime);
 
-    result.total = result.added.length + result.deleted.length + result.updated.length;
+    result.total = result.added.length + result.deleted.length + result.updated.length + result.renamed.length;
     
     return result;
   }
 
   async commit(message, stagingResult) {
     await this.db.run(
-      'INSERT INTO commits (message, timestamp, added, updated, deleted, renamed) VALUES (?, ?, ?, ?, ?, ?)',
-      [message, Date.now(), stagingResult.added, stagingResult.updated || 0, stagingResult.deleted, stagingResult.renamed]
+      'INSERT INTO commits (message, timestamp, added, updated, deleted, renamed, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [message, Date.now(), stagingResult.added, stagingResult.updated || 0, stagingResult.deleted, stagingResult.renamed, stagingResult.metadata || 0]
     );
   }
 

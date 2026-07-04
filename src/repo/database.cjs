@@ -103,13 +103,21 @@ class Database {
         added INTEGER DEFAULT 0,
         updated INTEGER DEFAULT 0,
         deleted INTEGER DEFAULT 0,
-        renamed INTEGER DEFAULT 0
+        renamed INTEGER DEFAULT 0,
+        metadata INTEGER DEFAULT 0
       )
     `);
 
     // 数据迁移：为已有仓库的 commits 表添加 updated 列
     try {
       await this.run('ALTER TABLE commits ADD COLUMN updated INTEGER DEFAULT 0');
+    } catch {
+      // 列已存在，忽略
+    }
+
+    // 数据迁移：为已有仓库的 commits 表添加 metadata 列
+    try {
+      await this.run('ALTER TABLE commits ADD COLUMN metadata INTEGER DEFAULT 0');
     } catch {
       // 列已存在，忽略
     }

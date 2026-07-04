@@ -56,6 +56,8 @@ module.exports = async function deleteResource(argv) {
     
     await repo.close();
     
+    process.exit(0);
+    
   } catch (error) {
     Logger.error(`删除资源失败: ${error.message}`);
     process.exit(1);

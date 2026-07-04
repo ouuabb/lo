@@ -41,6 +41,7 @@ async function rm(argv) {
   console.log(chalk.red(`\n暂存删除: ${relPath}`));
 
   await repo.close();
+  process.exit(0);
 }
 
 module.exports = rm;

@@ -63,6 +63,8 @@ module.exports = async function newResource(argv) {
     if (category) Logger.info('分类:', category);
     Logger.info('位置:', filePath);
 
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`创建失败: ${error.message}`);
     process.exit(1);

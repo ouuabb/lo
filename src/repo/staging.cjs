@@ -17,7 +17,8 @@ class StagingArea {
         added: [],
         modified: [],
         deleted: [],
-        renamed: []
+        renamed: [],
+        metadata: []
       };
     }
   }
@@ -32,7 +33,8 @@ class StagingArea {
       added: [],
       modified: [],
       deleted: [],
-      renamed: []
+      renamed: [],
+      metadata: []
     });
   }
 
@@ -145,6 +147,10 @@ class StagingArea {
       if (modIdx > -1) staging.modified.splice(modIdx, 1);
       const delIdx = staging.deleted.indexOf(relPath);
       if (delIdx > -1) staging.deleted.splice(delIdx, 1);
+      // 也重置该路径对应资源的元数据暂存
+      if (staging.metadata) {
+        staging.metadata = staging.metadata.filter(m => m.rid !== filePath && m.path !== relPath);
+      }
     } else {
       await this._clear();
       return null;
@@ -158,17 +164,42 @@ class StagingArea {
     return await this._load();
   }
 
+  // 暂存元数据变更（rid + 变更内容）
+  async stageMetadata(rid, changes) {
+    const staging = await this._load();
+    if (!staging.metadata) staging.metadata = [];
+
+    const existing = staging.metadata.find(m => m.rid === rid);
+    if (existing) {
+      Object.assign(existing, changes);
+    } else {
+      staging.metadata.push({ rid, ...changes });
+    }
+
+    await this._save(staging);
+  }
+
+  // 取消指定资源的元数据暂存
+  async resetMetadata(rid) {
+    const staging = await this._load();
+    if (staging.metadata) {
+      staging.metadata = staging.metadata.filter(m => m.rid !== rid);
+    }
+    await this._save(staging);
+  }
+
   async hasChanges() {
     const staging = await this._load();
     return staging.added.length > 0 ||
            staging.modified.length > 0 ||
            staging.deleted.length > 0 ||
-           staging.renamed.length > 0;
+           staging.renamed.length > 0 ||
+           (staging.metadata && staging.metadata.length > 0);
   }
 
   async commit(repository) {
     const staging = await this._load();
-    const results = { added: 0, updated: 0, deleted: 0, renamed: 0 };
+    const results = { added: 0, updated: 0, deleted: 0, renamed: 0, metadata: 0 };
 
     for (const relPath of staging.added) {
       const absPath = path.join(this.resourcesPath, relPath);
@@ -209,6 +240,19 @@ class StagingArea {
       if (existing) {
         await repository.resourceService.update(existing.rid, { path: newPath });
         results.renamed++;
+      }
+    }
+
+    // 处理元数据变更
+    if (staging.metadata && staging.metadata.length > 0) {
+      for (const meta of staging.metadata) {
+        const resource = await repository.resourceService.getByRid(meta.rid);
+        if (resource) {
+          const merged = { ...resource.metadata, ...meta };
+          delete merged.rid; // rid 不应存在于 metadata 中
+          await repository.resourceService.update(meta.rid, { metadata: merged });
+          results.metadata++;
+        }
       }
     }
 

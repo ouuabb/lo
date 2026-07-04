@@ -1,9 +1,6 @@
 const chalk = require('chalk');
 
 module.exports = function help(argv) {
-  console.log(chalk.bold.cyan('\nlo - 资源仓库 CLI'));
-  console.log(chalk.gray('='.repeat(40)));
-  
   console.log('\n' + chalk.bold('基础命令:'));
   console.log('  init          初始化资源仓库');
   console.log('  new           创建新资源');
@@ -33,7 +30,8 @@ module.exports = function help(argv) {
   console.log('  link          建立资源链接');
   console.log('  move          移动资源');
   console.log('  tag           管理标签');
-  console.log('  sync          同步资源');
+  console.log('  category      管理分类');
+  console.log('  sync          同步资源（与 add+commit 结果等价，无提交历史）');
   
   console.log('\n' + chalk.bold('搜索与查询:'));
   console.log('  find          搜索资源');
@@ -53,4 +51,5 @@ module.exports = function help(argv) {
   
   console.log('\n' + chalk.gray('使用 lo <command> --help 查看详细帮助'));
   console.log(chalk.gray('使用 lo manual 查看命令手册  |  lo docs 查看功能详解'));
+  process.exit(0);
 };

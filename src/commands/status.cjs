@@ -28,7 +28,7 @@ async function status(argv) {
   const files = await fs.readdir(resourcesDir, { recursive: true });
   
   const staged = { added: [], modified: [], deleted: [], renamed: [] };
-  const unstaged = { modified: [], deleted: [] };
+  const unstaged = { modified: [], deleted: [], renamed: [] };
   const untracked = [];
 
   for (const relPath of stagingStatus.added) {
@@ -90,10 +90,54 @@ async function status(argv) {
     }
   }
 
+  // 自动检测重命名：匹配"删除"文件的 hash 与"未跟踪"文件的 hash
+  const actualUntracked = [];
+  const actualDeleted = [];
+  const renameDetections = [];
+
+  if (unstaged.deleted.length > 0 && untracked.length > 0) {
+    const untrackedHashes = new Map();
+    for (const uf of untracked) {
+      const absPath = path.join(resourcesDir, uf);
+      untrackedHashes.set(uf, await HashUtils.fromFile(absPath, repo.cryptoKey));
+    }
+
+    for (const delRel of unstaged.deleted) {
+      const delAbs = path.join(resourcesDir, delRel);
+      const dbResource = dbPaths.get(delAbs);
+      if (!dbResource) {
+        actualDeleted.push(delRel);
+        continue;
+      }
+
+      let matched = false;
+      for (const [uf, ufHash] of untrackedHashes) {
+        if (ufHash === dbResource.hash) {
+          renameDetections.push({ old: delRel, new: uf });
+          untrackedHashes.delete(uf);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        actualDeleted.push(delRel);
+      }
+    }
+
+    unstaged.deleted = actualDeleted;
+
+    for (const [uf] of untrackedHashes) {
+      actualUntracked.push(uf);
+    }
+  } else {
+    actualUntracked.push(...untracked);
+  }
+  unstaged.renamed = renameDetections;
+
   console.log(chalk.bold('\n工作区状态'));
   console.log('----------------');
 
-  if (stagingStatus.added.length > 0 || stagingStatus.modified.length > 0 || stagingStatus.deleted.length > 0 || stagingStatus.renamed.length > 0) {
+  if (stagingStatus.added.length > 0 || stagingStatus.modified.length > 0 || stagingStatus.deleted.length > 0 || stagingStatus.renamed.length > 0 || (stagingStatus.metadata && stagingStatus.metadata.length > 0)) {
     console.log(chalk.cyan('\n暂存区:'));
     
     if (staged.added.length > 0) {
@@ -115,9 +159,20 @@ async function status(argv) {
       console.log(chalk.magenta('  重命名:'));
       staged.renamed.forEach(r => console.log(`    ${r.old} -> ${r.new}`));
     }
+
+    if (stagingStatus.metadata && stagingStatus.metadata.length > 0) {
+      console.log(chalk.yellow('  元数据变更:'));
+      stagingStatus.metadata.forEach(m => {
+        const changes = [];
+        if (m.tags) changes.push(`tags: [${m.tags.join(', ')}]`);
+        if (m.status) changes.push(`status: ${m.status}`);
+        if (m.category) changes.push(`category: ${m.category}`);
+        console.log(chalk.yellow(`    ${m.rid}  ${changes.join(', ')}`));
+      });
+    }
   }
 
-  if (unstaged.modified.length > 0 || unstaged.deleted.length > 0) {
+  if (unstaged.modified.length > 0 || unstaged.deleted.length > 0 || unstaged.renamed.length > 0) {
     console.log(chalk.cyan('\n未暂存的修改:'));
     
     if (unstaged.modified.length > 0) {
@@ -129,11 +184,16 @@ async function status(argv) {
       console.log(chalk.red('  删除:'));
       unstaged.deleted.forEach(file => console.log(`    ${file}`));
     }
+
+    if (unstaged.renamed.length > 0) {
+      console.log(chalk.magenta('  重命名:'));
+      unstaged.renamed.forEach(r => console.log(`    ${r.old} -> ${r.new}`));
+    }
   }
 
-  if (untracked.length > 0) {
+  if (actualUntracked && actualUntracked.length > 0) {
     console.log(chalk.cyan('\n未跟踪的文件:'));
-    untracked.forEach(file => {
+    actualUntracked.forEach(file => {
       console.log(chalk.green(`    ${file}`));
     });
   }
@@ -142,13 +202,16 @@ async function status(argv) {
       stagingStatus.modified.length === 0 &&
       stagingStatus.deleted.length === 0 && 
       stagingStatus.renamed.length === 0 &&
+      (!stagingStatus.metadata || stagingStatus.metadata.length === 0) &&
       unstaged.modified.length === 0 && 
-      unstaged.deleted.length === 0 && 
-      untracked.length === 0) {
+      unstaged.deleted.length === 0 &&
+      unstaged.renamed.length === 0 &&
+      actualUntracked.length === 0) {
     console.log(chalk.gray('\n工作区干净'));
   }
 
   await repo.close();
+  process.exit(0);
 }
 
 module.exports = status;

@@ -27,6 +27,8 @@ module.exports = async function stats(argv) {
       console.log('\n' + chalk.bold('最近活动:'), new Date(stats.latestActivity).toLocaleString());
     }
 
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`获取统计信息失败: ${error.message}`);
     process.exit(1);

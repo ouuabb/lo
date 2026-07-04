@@ -51,6 +51,9 @@ module.exports = async function auth(argv) {
         Logger.info('可用操作: add, remove, list, disable, status, verify, keys');
         process.exit(1);
     }
+
+    process.exit(0);
+
   } catch (error) {
     Logger.error(`认证操作失败: ${error.message}`);
     process.exit(1);

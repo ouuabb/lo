@@ -32,6 +32,7 @@ async function remoteAdd(argv) {
     );
 
     Logger.success(`远程别名已添加: ${chalk.cyan(name)} -> ${chalk.gray(url)}`);
+    process.exit(0);
   } catch (error) {
     Logger.error(`添加失败: ${error.message}`);
     process.exit(1);
@@ -64,6 +65,7 @@ async function remoteRemove(argv) {
 
     await repo.db.run('DELETE FROM sync_config WHERE key = ?', [key]);
     Logger.success(`远程别名已移除: ${chalk.cyan(name)} (原地址: ${chalk.gray(existing.value)})`);
+    process.exit(0);
   } catch (error) {
     Logger.error(`移除失败: ${error.message}`);
     process.exit(1);
@@ -95,6 +97,7 @@ async function remoteList() {
       console.log(`  ${chalk.cyan(name.padEnd(16))} ${chalk.gray(row.value)}`);
     }
     console.log('');
+    process.exit(0);
   } catch (error) {
     Logger.error(`列出失败: ${error.message}`);
     process.exit(1);
