@@ -6,7 +6,16 @@ const Repository = require('../repo/repository.cjs');
 const CryptoUtils = require('../utils/crypto.cjs');
 
 module.exports = async function init(argv) {
-  const targetPath = argv.path || process.cwd();
+  let targetPath = argv.path || process.cwd();
+  
+  // 如果提供了 name 参数，作为子目录名
+  if (argv.name) {
+    if (path.isAbsolute(argv.name)) {
+      targetPath = argv.name;
+    } else {
+      targetPath = path.join(targetPath, argv.name);
+    }
+  }
 
   try {
     Logger.info(`正在初始化资源仓库: ${targetPath}`);

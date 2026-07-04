@@ -49,12 +49,17 @@ const cli = yargs
   .strict();
 
 cli
-  .command('init', '初始化资源仓库', (yargs) => {
-    yargs.option('path', {
-      type: 'string',
-      description: '初始化路径',
-      default: process.cwd()
-    });
+  .command('init [name]', '初始化资源仓库', (yargs) => {
+    yargs
+      .positional('name', {
+        type: 'string',
+        description: '仓库文件夹名称或路径'
+      })
+      .option('path', {
+        type: 'string',
+        description: '初始化路径',
+        default: process.cwd()
+      });
   }, init)
 
   .command('import <path>', '导入资源', (yargs) => {
