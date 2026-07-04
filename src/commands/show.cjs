@@ -35,6 +35,7 @@ module.exports = async function show(argv) {
     if (raw) {
       console.log(content);
       await repo.close();
+      process.exit(0);
       return;
     }
 

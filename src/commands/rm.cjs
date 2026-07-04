@@ -17,6 +17,7 @@ async function rm(argv) {
   if (!await fs.pathExists(resourcesDir)) {
     console.log(chalk.red('resources 目录不存在'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
@@ -24,6 +25,7 @@ async function rm(argv) {
     console.log(chalk.red('请指定要删除的文件'));
     console.log(chalk.gray('用法: lo rm <文件路径>'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
@@ -34,6 +36,7 @@ async function rm(argv) {
   if (!absPath.startsWith(resourcesDir)) {
     console.log(chalk.red('文件必须在 resources 目录下'));
     await repo.close();
+    process.exit(0);
     return;
   }
 

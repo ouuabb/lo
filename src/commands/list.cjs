@@ -22,6 +22,7 @@ module.exports = async function list(argv) {
     if (!await fs.pathExists(resourcesDir)) {
       Logger.info('暂无资源');
       await repo.close();
+      process.exit(0);
       return;
     }
 

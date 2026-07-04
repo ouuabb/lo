@@ -24,6 +24,7 @@ async function log(argv) {
   if (commits.length === 0) {
     console.log(chalk.yellow('\n暂无提交记录'));
     await repo.close();
+    process.exit(0);
     return;
   }
 

@@ -25,6 +25,7 @@ module.exports = async function configCmd(argv) {
       }
       
       await repo.close();
+      process.exit(0);
       return;
     }
     

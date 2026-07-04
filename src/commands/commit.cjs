@@ -15,6 +15,7 @@ async function commit(argv) {
   if (!hasChanges) {
     console.log(chalk.yellow('\n暂存区为空'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
@@ -58,6 +59,7 @@ async function commit(argv) {
     console.log(chalk.red('\n请提供提交信息'));
     console.log(chalk.gray('使用: lo commit -m "提交信息"'));
     await repo.close();
+    process.exit(0);
     return;
   }
 

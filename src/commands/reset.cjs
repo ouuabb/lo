@@ -16,6 +16,7 @@ async function reset(argv) {
     await staging.reset();
     console.log(chalk.yellow('\n已清空暂存区'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
@@ -27,6 +28,7 @@ async function reset(argv) {
   if (!absPath.startsWith(resourcesDir)) {
     console.log(chalk.red('文件必须在 resources 目录下'));
     await repo.close();
+    process.exit(0);
     return;
   }
 

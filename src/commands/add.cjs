@@ -17,6 +17,7 @@ async function add(argv) {
   if (!await fs.pathExists(resourcesDir)) {
     console.log(chalk.red('resources 目录不存在'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
@@ -27,6 +28,7 @@ async function add(argv) {
     if (status.added.length > 0) console.log(`  新增: ${status.added.length}`);
     if (status.modified.length > 0) console.log(chalk.blue(`  修改: ${status.modified.length}`));
     await repo.close();
+    process.exit(0);
     return;
   }
 
@@ -39,12 +41,14 @@ async function add(argv) {
   if (!absPath.startsWith(resourcesDir)) {
     console.log(chalk.red('文件必须在 resources 目录下'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
   if (!await fs.pathExists(absPath)) {
     console.log(chalk.red('文件不存在'));
     await repo.close();
+    process.exit(0);
     return;
   }
 

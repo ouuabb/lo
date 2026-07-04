@@ -88,6 +88,7 @@ async function remoteList() {
       Logger.info('没有已配置的远程别名');
       console.log(chalk.gray('\n  使用 lo remote add <name> <url> 添加远程别名'));
       console.log(chalk.gray('  例如: lo remote add myserver root@192.168.1.100:/data/notes'));
+      process.exit(0);
       return;
     }
 

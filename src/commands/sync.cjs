@@ -104,6 +104,7 @@ async function push(argv) {
 
     if (unsyncedOps.length === 0) {
       Logger.success('没有需要推送的变更');
+      process.exit(0);
       return;  // finally 块会关闭 repo
     }
 

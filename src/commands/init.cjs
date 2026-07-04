@@ -22,6 +22,7 @@ module.exports = async function init(argv) {
 
     if (fs.existsSync(path.join(targetPath, '.repo'))) {
       Logger.warn('资源仓库已存在');
+      process.exit(0);
       return;
     }
 

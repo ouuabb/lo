@@ -19,6 +19,7 @@ async function status(argv) {
   if (!await fs.pathExists(resourcesDir)) {
     console.log(chalk.yellow('resources 目录不存在'));
     await repo.close();
+    process.exit(0);
     return;
   }
 
