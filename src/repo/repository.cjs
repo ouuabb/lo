@@ -9,6 +9,7 @@ const glob = require('glob');
 const fs = require('fs-extra');
 const path = require('path');
 const ResourceType = require('../utils/resourceType.cjs');
+const WikiLinkParser = require('../utils/wikilinkParser.cjs');
 
 class Repository {
   constructor(repoPath = process.cwd()) {
@@ -238,7 +239,12 @@ class Repository {
   }
 
   async importFile(filePath, type = null) {
-    return this.resourceService.importFile(filePath, type);
+    const resource = await this.resourceService.importFile(filePath, type);
+    // 如果是 .md 文件，自动解析并同步 [[...]] wikilink
+    if (resource && resource.path.toLowerCase().endsWith('.md')) {
+      try { await this.syncWikilinks(resource.rid); } catch (e) {}
+    }
+    return resource;
   }
 
   async importDirectory(dirPath, type = null) {
@@ -253,7 +259,7 @@ class Repository {
     const results = [];
     for (const file of files) {
       try {
-        const resource = await this.resourceService.importFile(file, type);
+        const resource = await this.importFile(file, type);
         results.push(resource);
       } catch (e) {
         console.warn(`Failed to import ${file}: ${e.message}`);
@@ -365,11 +371,106 @@ class Repository {
   }
 
   async linkResources(ridA, ridB, type = 'reference') {
+    if (type === 'wikilink') {
+      return this.relationService.create(ridA, ridB, type);
+    }
     return this.relationService.createBidirectional(ridA, ridB, type);
   }
 
   async unlinkResources(ridA, ridB, type) {
+    if (type === 'wikilink') {
+      return this.relationService.remove(ridA, ridB, type);
+    }
     return this.relationService.removeBidirectional(ridA, ridB, type);
+  }
+
+  /**
+   * 同步指定资源的 wikilink 关系
+   * 读取 .md 文件内容，解析 [[...]] 语法，更新 relations 表
+   * @param {string} rid
+   * @returns {{wikilinks: number, error?: string}}
+   */
+  async syncWikilinks(rid) {
+    const resource = await this.resourceService.getByRid(rid);
+    if (!resource) return { wikilinks: 0, error: 'Resource not found' };
+    if (resource.type !== 'note') return { wikilinks: 0 };
+    if (!resource.path.toLowerCase().endsWith('.md')) return { wikilinks: 0 };
+
+    try {
+      // 读取文件内容（自动处理加密/明文）
+      const content = await this.resourceService._readFile(resource.path, 'utf-8');
+
+      // 解析 [[...]] 引用
+      const targets = WikiLinkParser.parseTargets(content);
+
+      // 删除该资源所有旧的 wikilink 关系
+      const oldLinks = await this.relationService.getByFromRid(rid);
+      for (const old of oldLinks) {
+        if (old.type === 'wikilink') {
+          await this.relationService.remove(rid, old.to_rid, 'wikilink');
+        }
+      }
+
+      // 为每个 target 解析 RID 并创建新 wikilink
+      for (const target of targets) {
+        const targetRid = await this._resolveWikiLinkTarget(target);
+        if (targetRid && targetRid !== rid) {
+          try {
+            await this.relationService.create(rid, targetRid, 'wikilink');
+          } catch (e) {
+            // 重复关系静默跳过
+          }
+        }
+      }
+
+      return { wikilinks: targets.length >= 0 ? targets.length : 0 };
+    } catch (e) {
+      return { wikilinks: 0, error: e.message };
+    }
+  }
+
+  /**
+   * 将 wikilink target 名称解析为 RID
+   * 1. 按 metadata.title 匹配
+   * 2. 按文件路径匹配 (resources/Target.md 或 *-Target.md)
+   * @param {string} target
+   * @returns {Promise<string|null>}
+   */
+  async _resolveWikiLinkTarget(target) {
+    // 1. 按标题匹配
+    const all = await this.resourceService.getAll();
+    for (const r of all) {
+      if (r.metadata && r.metadata.title === target) {
+        return r.rid;
+      }
+    }
+
+    // 2. 按文件路径匹配
+    const resourcesDir = path.join(this.repoPath, 'resources');
+    let dirEntries = [];
+    try {
+      dirEntries = await fs.readdir(resourcesDir);
+    } catch (e) {
+      return null;
+    }
+
+    for (const entry of dirEntries) {
+      const fullPath = path.join(resourcesDir, entry);
+      // resources/Target.md 或 resources/YYYY-MM-DD-Target.md
+      if (entry === target + '.md' || entry.endsWith('-' + target + '.md')) {
+        try {
+          const stat = await fs.stat(fullPath);
+          if (stat.isFile()) {
+            const r = await this.resourceService.getByPath(fullPath);
+            if (r) return r.rid;
+          }
+        } catch (e) {
+          // 跳过
+        }
+      }
+    }
+
+    return null;
   }
 
   async getRelations(rid) {
@@ -432,7 +533,7 @@ class Repository {
   }
 
   async sync(options = {}) {
-    const { full = false, silent = false } = options;
+    const { full = false, silent = false, wikilinks = false } = options;
     
     const result = {
       added: [],
@@ -440,7 +541,8 @@ class Repository {
       updated: [],
       renamed: [],
       skipped: [],
-      total: 0
+      total: 0,
+      wikilinks: 0
     };
 
     const lastSyncTime = full ? 0 : await this.getLastSyncTime();
@@ -458,6 +560,7 @@ class Repository {
 
     // 第一阶段：处理路径匹配的文件（刷新已存在的），收集"疑似新增"文件
     const newFileCandidates = [];
+    const wikilinkSyncRids = new Set();
 
     for (const file of files) {
       try {
@@ -465,19 +568,19 @@ class Repository {
           continue;
         }
 
-        const stats = await fs.stat(file);
-        const mtime = stats.mtime.getTime();
-
-        if (!full && mtime < lastSyncTime) {
-          continue;
-        }
-
         const existing = dbByPath.get(file);
 
         if (!existing) {
-          // 路径不在 DB 中，暂不处理，稍后与"疑似删除"做 hash 匹配
+          // 新文件（可能来自重命名），始终处理，不依赖 mtime（rename 会保留原始 mtime）
           newFileCandidates.push(file);
         } else {
+          // 已存在的文件：用 mtime 做增量过滤
+          if (!full) {
+            const stats = await fs.stat(file);
+            if (stats.mtime.getTime() < lastSyncTime) {
+              continue;
+            }
+          }
           const refreshed = await this.resourceService.refresh(existing.rid);
           if (refreshed.hash !== existing.hash ||
               JSON.stringify(refreshed.metadata) !== JSON.stringify(existing.metadata)) {
@@ -486,6 +589,10 @@ class Repository {
               type: existing.type,
               rid: existing.rid
             });
+            // md 文件内容变更后需要同步 wikilink
+            if (file.toLowerCase().endsWith('.md')) {
+              wikilinkSyncRids.add(existing.rid);
+            }
             await this.logSync('updated', file, 'hash or metadata changed');
 
             if (this.syncOps) {
@@ -580,12 +687,16 @@ class Repository {
     for (const [newFile, newHash] of newFileHashes) {
       if (matchedNewPaths.has(newFile)) continue;
       try {
-        const resource = await this.resourceService.importFile(newFile);
+        const resource = await this.importFile(newFile);
         result.added.push({
           path: newFile,
           type: resource.type,
           rid: resource.rid
         });
+        // .md 文件的 wikilink 已在 importFile 中同步，此处跟踪计数
+        if (newFile.toLowerCase().endsWith('.md')) {
+          wikilinkSyncRids.add(resource.rid);
+        }
         await this.logSync('added', newFile, resource.type);
 
         if (this.syncOps) {
@@ -606,6 +717,28 @@ class Repository {
     }
 
     await this.setLastSyncTime(currentTime);
+
+    // 同步 wikilink 关系
+    if (wikilinks) {
+      // 全量扫描：所有 .md 文件
+      const allResources = await this.resourceService.getAll();
+      for (const r of allResources) {
+        if (r.path && r.path.toLowerCase().endsWith('.md')) {
+          const syncResult = await this.syncWikilinks(r.rid);
+          if (!syncResult.error) {
+            result.wikilinks += syncResult.wikilinks;
+          }
+        }
+      }
+    } else {
+      // 增量：只同步变更过的 .md 文件
+      for (const rid of wikilinkSyncRids) {
+        const syncResult = await this.syncWikilinks(rid);
+        if (!syncResult.error) {
+          result.wikilinks += syncResult.wikilinks;
+        }
+      }
+    }
 
     result.total = result.added.length + result.deleted.length + result.updated.length + result.renamed.length;
     
@@ -684,7 +817,7 @@ class Repository {
           await this.resourceService.update(existingByHash.rid, { path: file });
           movedCount++;
         } else {
-          await this.resourceService.importFile(file);
+          await this.importFile(file);
           addedCount++;
         }
       } catch (e) {
@@ -705,7 +838,7 @@ class Repository {
     switch (eventType) {
       case 'add':
         if (ResourceType.isSupported(filePath)) {
-          await this.resourceService.importFile(filePath);
+          await this.importFile(filePath);
         }
         break;
         

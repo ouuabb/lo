@@ -32,7 +32,7 @@ module.exports = function help(argv) {
   console.log('  move          移动资源');
   console.log('  tag           管理标签');
   console.log('  category      管理分类');
-  console.log('  sync          同步资源（与 add+commit 结果等价，无提交历史）');
+  console.log('  sync          同步资源（含 [[wikilink]] 自动解析，无提交历史）');
   
   console.log('\n' + chalk.bold('搜索与查询:'));
   console.log('  find          搜索资源');

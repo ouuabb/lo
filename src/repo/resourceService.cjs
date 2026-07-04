@@ -318,14 +318,9 @@ class ResourceService {
   async _extractMetadata(filePath, type) {
     const metadata = {};
 
-    try {
-      const stats = await fs.stat(filePath);
-      metadata.size = stats.size;
-      metadata.mtime = stats.mtime.getTime();
-      metadata.ctime = stats.ctime.getTime();
-    } catch (e) {
-      // 忽略文件状态读取错误
-    }
+    // 注意：不记录 mtime/ctime，因为加密等操作会修改文件时间戳，
+    // 导致后续 sync 的 metadata 比较误判为变更。
+    // sync 的增量检测直接使用 fs.stat().mtime。
 
     if (type === 'note') {
       try {

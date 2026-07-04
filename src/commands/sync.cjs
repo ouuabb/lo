@@ -14,7 +14,7 @@ const { resolveRemote } = require('../commands/remote.cjs');
  */
 
 async function localSync(argv) {
-  const { full, quiet } = argv;
+  const { full, quiet, wikilinks } = argv;
 
   const repo = new Repository(process.cwd());
   await repo.open();
@@ -26,10 +26,10 @@ async function localSync(argv) {
 
   if (!quiet) {
     Logger.info(`上次同步: ${lastSyncStr}`);
-    Logger.info(`正在同步资源${full ? ' (全量)' : ''}...`);
+    Logger.info(`正在同步资源${full ? ' (全量)' : ''}${wikilinks ? ' (含 wikilink 解析)' : ''}...`);
   }
 
-  const result = await repo.sync({ full });
+  const result = await repo.sync({ full, wikilinks });
 
   await repo.close();
 
@@ -50,6 +50,13 @@ async function localSync(argv) {
       });
     }
 
+    if (result.renamed.length > 0) {
+      console.log(chalk.blue(`→ 重命名: ${result.renamed.length}`));
+      result.renamed.forEach(item => {
+        console.log(`  - ${item.oldPath} → ${item.newPath}`);
+      });
+    }
+
     if (result.deleted.length > 0) {
       console.log(chalk.red(`- 删除: ${result.deleted.length}`));
       result.deleted.forEach(item => {
@@ -67,6 +74,10 @@ async function localSync(argv) {
 
     if (result.total === 0 && result.skipped.length === 0) {
       console.log(chalk.gray('  没有变化'));
+    }
+
+    if (result.wikilinks > 0) {
+      console.log(chalk.magenta(`? wikilink: ${result.wikilinks} 个`));
     }
 
     Logger.success(`同步完成，共处理 ${result.total} 个资源`);

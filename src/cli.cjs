@@ -324,6 +324,11 @@ cli
         type: 'boolean',
         description: '静默模式，不输出详细报告',
         default: false
+      })
+      .option('wikilinks', {
+        type: 'boolean',
+        description: '解析并同步所有 .md 文件的 [[...]] 双向链接',
+        default: false
       });
   }, sync)
 
