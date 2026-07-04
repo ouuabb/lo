@@ -31,6 +31,7 @@ const reset = require('./commands/reset.cjs');
 const log = require('./commands/log.cjs');
 const auth = require('./commands/auth.cjs');
 const remote = require('./commands/remote.cjs');
+const serve = require('./commands/serve.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -420,7 +421,23 @@ cli
         description: '认证会话有效期（分钟，默认 15）',
         default: 15
       });
-  }, auth);
+  }, auth)
+  
+  .command('serve', '启动本地 HTTP API 服务', (yargs) => {
+    yargs
+      .option('port', {
+        type: 'number',
+        alias: 'p',
+        description: '监听端口',
+        default: 8765
+      })
+      .option('repo', {
+        type: 'string',
+        alias: 'r',
+        description: '仓库路径',
+        default: process.cwd()
+      });
+  }, serve);
 
 cli.fail((msg, err, yargs) => {
   if (err) {

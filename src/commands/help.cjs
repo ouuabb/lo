@@ -25,6 +25,7 @@ module.exports = function help(argv) {
   console.log('  push          推送变更到远程设备');
   console.log('  pull          从远程设备拉取变更');
   console.log('  clone         从远程仓库克隆');
+  console.log('  serve         启动本地 HTTP API 服务');
 
   console.log('\n' + chalk.bold('资源管理:'));
   console.log('  link          建立资源链接');
