@@ -16,6 +16,7 @@ const category = require('./commands/category.cjs');
 const find = require('./commands/find.cjs');
 const stats = require('./commands/stats.cjs');
 const link = require('./commands/link.cjs');
+const unlink = require('./commands/unlink.cjs');
 const move = require('./commands/move.cjs');
 const backup = require('./commands/backup.cjs');
 const daily = require('./commands/daily.cjs');
@@ -249,6 +250,23 @@ cli
         default: 'reference'
       });
   }, link)
+
+  .command('unlink <from> <to>', '解除资源链接', (yargs) => {
+    yargs
+      .positional('from', {
+        type: 'string',
+        description: '源资源（RID 或路径）'
+      })
+      .positional('to', {
+        type: 'string',
+        description: '目标资源（RID 或路径）'
+      })
+      .option('type', {
+        type: 'string',
+        description: '链接类型',
+        default: 'reference'
+      });
+  }, unlink)
 
   .command('move <rid> <dest>', '移动资源', (yargs) => {
     yargs

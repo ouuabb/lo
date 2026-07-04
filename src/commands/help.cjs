@@ -28,6 +28,7 @@ module.exports = function help(argv) {
 
   console.log('\n' + chalk.bold('资源管理:'));
   console.log('  link          建立资源链接');
+  console.log('  unlink        解除资源链接');
   console.log('  move          移动资源');
   console.log('  tag           管理标签');
   console.log('  category      管理分类');

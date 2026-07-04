@@ -323,7 +323,24 @@ const SECTIONS = {
       '  lo link res_abc res_xyz                       # 建立引用',
       '  lo link res_abc res_xyz --type reference',
       '',
-      '相关命令: lo tag'
+      '相关命令: lo unlink'
+    ]
+  },
+
+  unlink: {
+    title: 'unlink — 解除资源链接',
+    usage: 'lo unlink <源> <目标> [--type <类型>]',
+    description: [
+      '解除两个资源之间的双向引用关系。',
+      '',
+      '链接类型:',
+      '  reference    引用关系（默认）',
+      '',
+      '示例:',
+      '  lo unlink res_abc res_xyz                     # 解除引用',
+      '  lo unlink res_abc res_xyz --type reference',
+      '',
+      '相关命令: lo link'
     ]
   },
 
@@ -852,7 +869,7 @@ function printOverview() {
   const categories = [
     { name: '基础命令', cmds: ['init', 'new', 'import', 'list', 'show', 'edit', 'delete'] },
     { name: '版本控制', cmds: ['add', 'commit', 'reset', 'diff', 'log', 'status', 'rm'] },
-    { name: '资源管理', cmds: ['link', 'move', 'tag', 'category', 'sync'] },
+    { name: '资源管理', cmds: ['link', 'unlink', 'move', 'tag', 'category', 'sync'] },
     { name: '远程同步', cmds: ['remote', 'push', 'pull', 'clone', 'serve'] },
     { name: '搜索与查询', cmds: ['find', 'stats', 'index'] },
     { name: '安全', cmds: ['auth'] },

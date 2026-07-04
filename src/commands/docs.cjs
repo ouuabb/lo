@@ -862,6 +862,7 @@ const SECTIONS = {
   │  resources   │  资源元数据（RID、路径、   │
   │              │  哈希、类型、加密状态等）  │
   │  relations   │  资源间的双向链接关系     │
+  │              │  (lo link / lo unlink)      │
   │  commits     │  提交历史记录             │
   │  sync_config │  配置键值对（认证设置）    │
   │  sync_log    │  同步操作日志             │
