@@ -522,31 +522,90 @@ const SECTIONS = {
     console.log(chalk.bold.cyan('\n  SSH 身份认证系统'));
 
     // 3.0
-    console.log(chalk.bold.yellow('\n  先搞清楚：SSH 在这个项目里到底做什么'));
+    console.log(chalk.bold.yellow('\n  SSH 在项目中的全部作用'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
-  一句话：SSH 只做一件事——保护 RepoKey 不被别人直接拿走。
+  SSH 在 lo 中有两个互不相关的用途：
 
-  lo 的加密核心是 RepoKey（一个随机 32 字节密钥），文件加解密从头到尾
-  都是它的活。SSH 全程不参与文件加密。
+  用途一：保护 RepoKey（lo auth 管理）
+  ───────────────────────────────────
+    机制：读取 SSH 私钥内容 → HKDF 派生 KEK → 加密 repo.key
+    命令：lo auth add / remove / list
+    效果：防止硬盘被盗后攻击者直接拿走明文密钥
+    参与方：你的 SSH 私钥文件中存储的密钥材料
 
-  没有 SSH：RepoKey 明文放 .repo/keys/repo.key
-           → 偷你硬盘的人直接拿走，能解密所有文件
+  用途二：传输文件（系统 SCP）
+  ───────────────────────────────────
+    机制：lo push/pull/clone 底层调用 scp 命令上传/下载 batch.tar.gz
+    命令：lo push / pull / clone
+    效果：通过 SSH 加密通道安全传输同步数据
+    参与方：~/.ssh/config、ssh-agent、密钥文件（与 lo auth 无关）
 
-  有 SSH：  RepoKey 被锁进 protected_xxx.key
-           → 偷你硬盘的人拿到也打不开，缺 SSH 私钥
-
-  所以：
-  - SSH 是"门锁"，不是"门"
-  - 只要你有 RepoKey 本身（不管经过 SSH 没），就能解密文件
-  - 安全备份的是 RepoKey，不是 SSH 密钥
-  - 本节的挑战-应答、签名验证等全部是为了安全地取出 RepoKey 而设计的`);
+  两者完全独立：
+  - lo auth 管密钥保护，SCP 管文件传输
+  - 可以为 lo auth 注册一把 ed25519 密钥，同时 SCP 用另一把 RSA 密钥
+  - 禁用 lo auth 不影响 push/pull（只要系统 SSH 配置正确）`);
 
     // 3.1
-    console.log(chalk.bold.yellow('\n  为什么需要 SSH 认证'));
+    console.log(chalk.bold.yellow('\n  SSH 不是加密的核心'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
-  RepoKey 绑定 SSH 前以明文存储。SSH 认证后：
+  重要：lo 的加密体系不依赖 SSH。核心始终是 RepoKey。
+
+  SSH 做什么：
+    - 把明文 repo.key 锁进 protected_xxx.key
+    - 每次需要 repo.key 时验证你的身份再交出来
+
+  SSH 不做什么：
+    - 不加密你的笔记文件（那是 RepoKey 的活）
+    - 不生成 RepoKey（那是 crypto.randomBytes 的活）
+    - 不参与文件加解密的任何环节
+    - 不参与 push/pull 的传输加密（那是 SCP 的活）
+
+  类比：
+    RepoKey = 保险柜的钥匙
+    SSH    = 你办公室门上的指纹锁
+
+    笔记在保险柜里（用 RepoKey 锁的），办公室门有指纹锁（SSH）。
+    但保险柜的钥匙才是打开笔记的唯一方式。
+    指纹锁只是多一道门——不会让保险柜本身更安全，
+    只是让"偷钥匙"这件事难度增加。
+
+  没有 SSH 也能用：
+    lo init → repo.key 明文 → 直接加密解密文件
+    lo push → SCP 上传（系统 SSH，与 lo auth 无关）
+
+    有 SSH 更好：
+    lo auth add → repo.key 被锁 → 攻击者偷硬盘也拿不到
+    每次用之前验证身份 → 零信任原则`);
+
+    // 3.2
+    console.log(chalk.bold.yellow('\n  有 SSH vs 无 SSH 的安全对比'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  ┌──────────────────────┬────────────────────┬────────────────────┐
+  │  场景                │  无 lo auth         │  有 lo auth         │
+  ├──────────────────────┼────────────────────┼────────────────────┤
+  │  硬盘被盗（关机）    │  直接解密所有文件   │  无法解密          │
+  │  硬盘被盗（登录后）  │  直接解密           │  能解密（私钥在）  │
+  │  备份文件泄露        │  能解密             │  能（备份排除了key）│
+  │  服务器被攻破        │  能解密（无加密）   │  只有密文          │
+  │  U盘/移动硬盘丢失   │  直接解密           │  无法解密          │
+  └──────────────────────┴────────────────────┴────────────────────┘
+
+  结论：SSH 主要防的是"硬盘/存储介质被动泄露"场景。
+  如果攻击者已经坐在你登录后的电脑前，任何本地加密方案都防不住。
+
+  安全备份的正确姿势：
+    - 备份的是 RepoKey 本身（打印、写纸上、放密码管理器）
+    - 不是备份 SSH 密钥
+    - SSH 可以随时换，RepoKey 丢了就永远解不开文件`);
+
+    // 3.3
+    console.log(chalk.bold.yellow('\n  SSH 认证如何工作'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  RepoKey 绑定 SSH 前以明文存储。lo auth add 后：
 
   ┌────────────────────────┬────────────┬────────────┐
   │                        │  无 SSH     │  有 SSH     │
@@ -557,17 +616,19 @@ const SECTIONS = {
   │  安全等级              │  基础       │  增强       │
   └────────────────────────┴────────────┴────────────┘
 
-  认证流程：
-  1. 运行 lo 命令 → 触发认证检查
-  2. 检查会话缓存（15 分钟 TTL）
-  3. 读取已注册的公钥列表
-  4. 匹配本地 SSH 密钥
-  5. 用本地私钥对 256-bit nonce 签名
-  6. 用注册的公钥验证签名
-  7. 通过 → HKDF 派生 KEK → 解密 protected_*.key
+  每次需要解密时的认证流程：
+  1. 检查当前仓库是否注册过 SSH 密钥
+     → 没注册：直接用明文 repo.key（跳过认证）
+     → 注册了：进入认证流程
+  2. 检查会话缓存（15 分钟 TTL，命中跳过）
+  3. 生成随机 nonce（256-bit）
+  4. 用本地 SSH 私钥对 nonce 签名
+  5. 用注册的公钥验证签名
+  6. 通过 → HKDF 派生 KEK → 解密 protected_*.key → 拿到 RepoKey
+  7. RepoKey 仅存于内存，用完擦除
   8. 保存会话缓存`);
 
-    // 3.2
+    // 3.4
     console.log(chalk.bold.yellow('\n  挑战-应答认证协议'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
@@ -592,13 +653,13 @@ const SECTIONS = {
            │                         │
 
   安全特性：
-  - 零知识：私钥不离开本地
-  - 防重放：每次使用不同 nonce
-  - 多密钥：任意一把通过即可
-  - 会话缓存：15 分钟 TTL
+  - 零知识：私钥不离开本地，只传签名不传私钥
+  - 防重放：每次使用不同 nonce，旧签名无法复用
+  - 多密钥：任意一把注册过的密钥通过即可
+  - 会话缓存：15 分钟 TTL，避免频繁签名
   - 环境变量 LO_AUTH_SKIP=1 可跳过（CI/CD）`);
 
-    // 3.3
+    // 3.5
     console.log(chalk.bold.yellow('\n  签名机制'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
@@ -612,7 +673,7 @@ const SECTIONS = {
 
   支持的密钥：Ed25519 (推荐), ECDSA, RSA`);
 
-    // 3.4
+    // 3.6
     console.log(chalk.bold.yellow('\n  多设备支持'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
@@ -630,12 +691,12 @@ const SECTIONS = {
     │  不同 KEK，解密出相同的 RepoKey               │
     └─────────────────────────────────────────────┘
 
-  同步注意事项：
-  - .repo/ 目录需随仓库同步（含 protected_*.key）
-  - .repo/ 已在 .gitignore 中
-  - 推荐 Git 管理 resources/ + rsync 同步 .repo/`);
+  前提：两台设备持有同一把 RepoKey（需手动安全传递）。
 
-    // 3.5
+  受保护的密钥文件 protected_xxx.key 可以随仓库同步，
+  因为它是用 KEK 加密的——没有对应 SSH 私钥的人打不开。`);
+
+    // 3.7
     console.log(chalk.bold.yellow('\n  会话缓存'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
@@ -646,14 +707,42 @@ const SECTIONS = {
   - 默认 TTL：15 分钟（--ttl 可调）
   - 过期后下次命令触发重新认证
   - 仅对同一仓库路径有效
+  - 缓存到期或手动 lo auth clear 清理
 
   性能：
-  - 首次认证：约 1-3 秒
+  - 首次认证：约 1-3 秒（生成 nonce + 签名 + HKDF + 解密）
   - 缓存命中：几乎零开销
   - 加密 I/O 开销通常 < 5%
 
   环境变量：
     LO_AUTH_SKIP=1  跳过认证（CI/CD 环境）`);
+
+    // 3.8
+    console.log(chalk.bold.yellow('\n  SSH 的局限与注意事项'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
+  1. SSH 私钥是否有密码保护，对 lo 没有影响
+     lo 读取的是 SSH 私钥文件的原始字节来派生 KEK。
+     即使你给 SSH 私钥加了密码，lo 读到的是加密后的文件内容，
+     派生出的 KEK 是一样的，解密 protected_xxx.key 的结果也是一样的。
+     SSH 私钥密码保护的是"别人能不能用你的私钥登录其他服务器"，
+     而不是"别人能不能用你的 lo"。
+
+  2. 攻击者已登录你的电脑时，SSH 没法防
+     这是所有本地加密方案的共同局限。repo.key 在内存中时，
+     有足够权限的恶意软件可以截获它。这不是 lo 特有的问题。
+
+  3. SSH 不是强制的，但推荐使用
+     可以完全不使用 lo auth，repo.key 保持明文。
+     适用场景：单机使用、测试环境、对安全要求不高的临时仓库。
+
+  4. 多设备时 RepoKey 需要手动传递
+     lo auth 只保护本地的 repo.key，不负责跨设备分发。
+     push/pull 不会自动传输 repo.key。
+
+  5. protected_xxx.key 和 SSH 私钥必须在不同设备上配对使用
+     换了 SSH 私钥 → 旧的 protected 文件作废，需要重新 lo auth add。
+     换了设备 → 需要把 RepoKey 明文传过去，再用新设备的 SSH 密钥保护。`);
   },
 
   version: () => {
