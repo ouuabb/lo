@@ -25,7 +25,7 @@ const help = require('./commands/help.cjs');
 const importCmd = require('./commands/import.cjs');
 const sync = require('./commands/sync.cjs');
 const manual = require('./commands/manual.cjs');
-const docs = require('./commands/docs.cjs');
+const docs = require('./commands/docs/index.cjs');
 const status = require('./commands/status.cjs');
 const add = require('./commands/add.cjs');
 const commit = require('./commands/commit.cjs');
@@ -395,7 +395,7 @@ cli
     yargs
       .positional('topic', {
         type: 'string',
-        description: '查看的主题（encryption, auth, version, database, security, quickstart）'
+        description: '查看的主题（notes, encryption, auth, version, database, security, quickstart）'
       });
   }, docs)
 

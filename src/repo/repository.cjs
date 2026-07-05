@@ -431,13 +431,21 @@ class Repository {
 
   /**
    * 将 wikilink target 名称解析为 RID
-   * 1. 按 metadata.title 匹配
-   * 2. 按文件路径匹配 (resources/Target.md 或 *-Target.md)
+   * 1. 按 RID 直接匹配 (res_xxx 格式，唯一且精确)
+   * 2. 按 metadata.title 匹配
+   * 3. 按文件路径匹配 (resources/Target.md 或 *-Target.md)
    * @param {string} target
    * @returns {Promise<string|null>}
    */
   async _resolveWikiLinkTarget(target) {
-    // 1. 按标题匹配
+    // 1. 按 RID 直接匹配（res_ 前缀，唯一标识符）
+    if (target.startsWith('res_')) {
+      const resource = await this.resourceService.getByRid(target);
+      if (resource) return resource.rid;
+      return null;
+    }
+
+    // 2. 按标题匹配
     const all = await this.resourceService.getAll();
     for (const r of all) {
       if (r.metadata && r.metadata.title === target) {
@@ -445,7 +453,7 @@ class Repository {
       }
     }
 
-    // 2. 按文件路径匹配
+    // 3. 按文件路径匹配
     const resourcesDir = path.join(this.repoPath, 'resources');
     let dirEntries = [];
     try {
