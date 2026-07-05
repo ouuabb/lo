@@ -486,6 +486,7 @@ module.exports = function() {
        → 建议安全离线存储一份 RepoKey 备份`);
 
     console.log(chalk.gray('\n  相关文档：'));
+    console.log(chalk.gray('    lo docs deploy        — 仓库部署与推送实战'));
     console.log(chalk.gray('    lo docs encryption    — 加密系统详解'));
     console.log(chalk.gray('    lo docs auth          — SSH 身份认证'));
     console.log(chalk.gray('    lo docs serve         — HTTP API 服务'));

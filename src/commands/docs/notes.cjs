@@ -101,10 +101,11 @@ module.exports = function() {
     - title 仅 note 类型自动提取，其他类型不提取
     - wordCount 仅 note 类型自动提取，其他类型不提取
     - conflict / original_rid 由同步冲突解决自动写入，不应手动设置
-    - mimetype / size 由 HTTP API 上传端点自动写入，对本地笔记无意义
+    - mimetype / size 由 HTTP API 上传端点自动写入，对本地笔记无意义`);
 
-  标题提取 —— 从 # heading 提取 title
-  ─────────────────────────────────────────────
+    console.log(chalk.bold.cyan('\n  标题提取 —— 从 # heading 提取 title'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`
 
   标题是笔记最重要的元数据之一，它不仅是列表显示、搜索匹配的核心字段，
   也是 [[wikilink]] 双向链接中通过标题方式匹配的关键依据（推荐使用
@@ -222,7 +223,7 @@ module.exports = function() {
     - 仅对 note 类型自动提取，按空白字符分割后计数
     - ResourceService._extractMetadata 实现: content.split(/\\s+/).filter(w => w.length > 0).length
     - 存储于 metadata.wordCount，写入时校验为整数 >= 0
-    - 可通过 lo show 查看，lo list 中作为一列显示
+    - 可通过 lo show 查看，lo list 中作为一列显示`);
 
     console.log(chalk.bold.yellow('\n  四、笔记的状态系统'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));

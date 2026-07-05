@@ -19,6 +19,7 @@ const packageJson = require('../../../package.json');
  *   security     安全设计摘要
  *   sync         远程同步系统
  *   serve        本地 HTTP API 服务
+ *   deploy       仓库部署与远程推送
  *   wikilink     [[wikilink]] 双向链接
  *   quickstart   快速上手指南
  */
@@ -34,6 +35,7 @@ const SECTIONS = {
   security: require('./security.cjs'),
   sync: require('./sync.cjs'),
   serve: require('./serve.cjs'),
+  deploy: require('./deploy.cjs'),
   quickstart: require('./quickstart.cjs'),
   wikilink: require('./wikilink.cjs')
 };
@@ -60,12 +62,14 @@ const TOPIC_ALIASES = {
   security: 'security',
   safe: 'security',
   sync: 'sync',
-  push: 'sync',
-  pull: 'sync',
-  clone: 'sync',
   remote: 'sync',
   serve: 'serve',
   api: 'serve',
+  deploy: 'deploy',
+  push: 'deploy',
+  pull: 'deploy',
+  clone: 'deploy',
+  deployment: 'deploy',
   quickstart: 'quickstart',
   start: 'quickstart',
   guide: 'quickstart',
@@ -94,6 +98,7 @@ function printIndex() {
     { id: 'security',    name: '安全设计摘要',    desc: '9 项安全措施一览' },
     { id: 'sync',       name: '远程同步系统',    desc: '多设备同步、操作日志、冲突处理' },
     { id: 'serve',      name: '本地 HTTP API',   desc: 'lo serve、REST接口、SSH认证、外部集成' },
+    { id: 'deploy',     name: '部署与推送',       desc: '服务器部署、SSH配置、push/pull/clone、API推送、自动化' },
     { id: 'wikilink',   name: '[[wikilink]] 双向链接', desc: '笔记间双向引用、别名语法、与 sync 的协作、数据模型' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
