@@ -9,11 +9,12 @@ const packageJson = require('../../../package.json');
  *   lo docs <topic>         显示指定主题的详细说明
  *
  * 主题:
- *   overview     项目概述
- *   notes        笔记详解（什么是笔记、文件格式、元数据、CRUD、模板、标签分类、版本控制）
- *   concepts     核心设计观念
- *   encryption   端到端加密系统
- *   auth         SSH 身份认证系统
+ *   overview      项目概述
+ *   notes         笔记详解（什么是笔记、文件格式、元数据、CRUD、模板、标签分类、版本控制）
+ *   concepts      核心设计观念
+ *   architecture  架构分析（数据存储、类关系、扩展点、承载量、模块系统设计）
+ *   encryption    端到端加密系统
+ *   auth          SSH 身份认证系统
  *   version      版本控制系统
  *   database     数据库与资源索引
  *   security     安全设计摘要
@@ -28,6 +29,7 @@ const SECTIONS = {
   overview: require('./overview.cjs'),
   notes: require('./notes.cjs'),
   concepts: require('./concepts.cjs'),
+  architecture: require('./architecture.cjs'),
   encryption: require('./encryption.cjs'),
   auth: require('./auth.cjs'),
   version: require('./version.cjs'),
@@ -50,6 +52,9 @@ const TOPIC_ALIASES = {
   design: 'concepts',
   rid: 'concepts',
   resource: 'concepts',
+  architecture: 'architecture',
+  arch: 'architecture',
+  architecture: 'architecture',
   encryption: 'encryption',
   encrypt: 'encryption',
   e2ee: 'encryption',
@@ -91,6 +96,7 @@ function printIndex() {
     { id: 'overview',    name: '项目概述',       desc: '核心理念、数据自主、零知识架构' },
     { id: 'notes',       name: '笔记详解',       desc: '什么是笔记、文件格式、元数据、CRUD、模板、标签分类、版本控制' },
     { id: 'concepts',    name: '核心设计观念',   desc: '资源平等、RID 独立性、不可变实体' },
+    { id: 'architecture',name: '架构分析',       desc: '数据存储层、类关系、扩展点、承载量、模块系统设计' },
     { id: 'encryption',  name: '端到端加密系统',  desc: 'AES-256-GCM、LOEC格式、密钥分层、HKDF、完整机制、同步中的加密' },
     { id: 'auth',        name: 'SSH 身份认证',    desc: '挑战-应答协议、多设备支持、会话缓存' },
     { id: 'version',     name: '版本控制系统',    desc: '暂存区、提交历史、状态检测' },
