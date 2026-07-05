@@ -1,6 +1,7 @@
 const RidUtils = require('../utils/rid.cjs');
 const HashUtils = require('../utils/hash.cjs');
 const ResourceType = require('../utils/resourceType.cjs');
+const { assertMetadata } = require('../utils/validateMetadata.cjs');
 const fs = require('fs-extra');
 const path = require('path');
 
@@ -73,7 +74,7 @@ class ResourceService {
 
     // 自动提取元数据（title, wordCount, size, mtime），调用方传入的优先级更高
     const extracted = await this._extractMetadata(filePath, type);
-    const metadata = { ...extracted, ...callerMeta };
+    const metadata = assertMetadata({ ...extracted, ...callerMeta }, 'resourceService.create');
 
     const contentBuffer = await fs.readFile(filePath);
     const CryptoUtils = require('../utils/crypto.cjs');
@@ -185,8 +186,9 @@ class ResourceService {
     }
     
     if (metadata) {
+      const validated = assertMetadata(metadata, 'resourceService.update');
       sql += ', metadata = ?';
-      params.push(JSON.stringify(metadata));
+      params.push(JSON.stringify(validated));
     }
     
     sql += ' WHERE rid = ? AND deleted = 0';

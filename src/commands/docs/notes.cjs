@@ -59,27 +59,49 @@ module.exports = function() {
     console.log(chalk.bold.yellow('\n  三、笔记的元数据'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
-  lo 在索引笔记时自动提取以下元数据（存储在 SQLite resources 表）：
+  lo 在索引笔记时自动提取以下元数据，存储分为两层：
 
-  ┌─────────────────┬──────────────────────────────────────┐
-  │  字段            │  说明                                │
-  ├─────────────────┼──────────────────────────────────────┤
-  │  rid             │  资源唯一标识符 (res_xxxxxxxxxxxx)    │
-  │  title           │  从 # heading 提取，若无则用文件名   │
-  │  type            │  'note'                              │
-  │  path            │  resources/ 下的相对路径              │
-  │  hash            │  明文 SHA-256（内容变更检测）         │
-  │  wordCount       │  中文字数统计                        │
-  │  links           │  提取的 [链接](url) 列表             │
-  │  todos           │  提取的 - [ ] 待办事项列表           │
-  │  created         │  创建日期 (YYYY-MM-DD)               │
-  │  modified        │  最后修改日期                        │
-  │  status          │  draft / published / archived        │
-  │  tags            │  标签数组                            │
-  │  category        │  分类目录                            │
-  │  encrypted       │  是否已加密 (0/1)                    │
-  │  deleted         │  是否已软删除 (0/1)                  │
-  └─────────────────┴──────────────────────────────────────┘
+  SQLite resources 表的结构字段（所有资源类型共用）：
+
+  ┌─────────────┬──────────────────────────────────────────┐
+  │  列名        │  说明                                    │
+  ├─────────────┼──────────────────────────────────────────┤
+  │  rid         │  资源唯一标识符 (res_xxxxxxxxxxxx)        │
+  │  type        │  资源类型（note/image/pdf/video/...）     │
+  │  path        │  resources/ 下的相对路径                  │
+  │  hash        │  明文 SHA-256（内容变更检测）             │
+  │  metadata    │  JSON 元数据（见下方字段表）              │
+  │  encrypted   │  是否已加密 (0/1)                        │
+  │  created     │  创建时间戳 (ms)                         │
+  │  updated     │  最后修改时间戳 (ms)                     │
+  │  deleted     │  是否已软删除 (0/1)                      │
+  └─────────────┴──────────────────────────────────────────┘
+
+  metadata JSON 字段（写入时严格校验，字段不存在或类型错误直接报错）：
+
+  ┌───────────────┬──────────────┬─────────────────────────────────┐
+  │  字段          │  类型         │  说明                           │
+  ├───────────────┼──────────────┼─────────────────────────────────┤
+  │  title         │  string      │  从 # heading 提取，非空字符串   │
+  │  wordCount     │  number      │  词数统计，整数 >= 0             │
+  │  tags          │  string[]    │  标签列表，元素为非空字符串       │
+  │  category      │  string|null │  分类，空字符串自动转为 null      │
+  │  status        │  string      │  draft / published / archived    │
+  │  conflict      │  boolean     │  同步冲突标记（系统自动设置）     │
+  │  original_rid  │  string      │  冲突来源 RID（以 res_ 开头）    │
+  │  mimetype      │  string      │  MIME 类型（含 /），如 image/png │
+  │  size          │  number      │  文件大小（字节）>= 0            │
+  └───────────────┴──────────────┴─────────────────────────────────┘
+
+  校验规则（严格模式）：
+    - 写入上述字段时类型必须匹配，否则抛出错误
+    - 写入上述以外的字段（如拼写错误的 tgas、titel）直接报错
+    - tags 元素不能为空字符串，重复值自动去重
+    - category 设为 '' 或 undefined 时自动规范化为 null
+    - title 仅 note 类型自动提取，其他类型不提取
+    - wordCount 仅 note 类型自动提取，其他类型不提取
+    - conflict / original_rid 由同步冲突解决自动写入，不应手动设置
+    - mimetype / size 由 HTTP API 上传端点自动写入，对本地笔记无意义
 
   标题提取 —— 从 # heading 提取 title
   ─────────────────────────────────────────────
@@ -196,16 +218,11 @@ module.exports = function() {
     - 避免在笔记中写多个 # heading（只会取第一个，其余的不会影响 title）
     - 标题不要包含 | 字符，否则 [[...]] 别名语法会解析异常
 
-  字数统计：
-    - 去除 Markdown 语法字符（# * \` _ ~）后，按空白字符分割计数
-    - Note 类实现: content.replace(/[#*\`_~]/g, '').split(/\s+/).length
-    - ResourceService 实现: content.split(/\s+/).length（不去除符号）
+  字数统计（wordCount）：
+    - 仅对 note 类型自动提取，按空白字符分割后计数
+    - ResourceService._extractMetadata 实现: content.split(/\\s+/).filter(w => w.length > 0).length
+    - 存储于 metadata.wordCount，写入时校验为整数 >= 0
     - 可通过 lo show 查看，lo list 中作为一列显示
-
-  待办提取：
-    - 匹配 Markdown 语法: - [ ] 和 - [x]
-    - 统计总数和已完成数
-    - 格式: { total: N, completed: M }`);
 
     console.log(chalk.bold.yellow('\n  四、笔记的状态系统'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));

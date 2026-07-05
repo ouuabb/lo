@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs-extra');
+const { assertMetadata } = require('../utils/validateMetadata.cjs');
 
 /**
  * 同步操作日志引擎
@@ -174,11 +175,12 @@ class SyncOpsEngine {
         // 资源文件应该已经随批次一起传输到了正确位置
         const absPath = path.join(this.repoPath, data.path);
         if (await fs.pathExists(absPath)) {
+          const validatedMeta = assertMetadata(data.metadata || {}, 'syncOps.applyOp:RESOURCE_CREATED');
           await this.db.run(
             `INSERT OR IGNORE INTO resources (rid, type, path, hash, metadata, encrypted, created, updated, deleted)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
             [rid, data.type, absPath, data.hash,
-             JSON.stringify(data.metadata || {}),
+             JSON.stringify(validatedMeta),
              data.encrypted ? 1 : 0,
              data.created || opTimestamp, data.updated || opTimestamp]
           );
@@ -204,12 +206,16 @@ class SyncOpsEngine {
           const localMeta = typeof local.metadata === 'string'
             ? JSON.parse(local.metadata)
             : (local.metadata || {});
+          const conflictMeta = assertMetadata(
+            { ...localMeta, conflict: true, original_rid: rid },
+            'syncOps.applyOp:conflict_backup'
+          );
 
           await this.db.run(
             `INSERT OR REPLACE INTO resources (rid, type, path, hash, metadata, encrypted, created, updated, deleted)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
             [rid + '_conflict_' + Date.now(), local.type, conflictPath, local.hash,
-             JSON.stringify({ ...localMeta, conflict: true, original_rid: rid }),
+             JSON.stringify(conflictMeta),
              local.encrypted ? 1 : 0, local.created, local.updated]
           );
 
@@ -225,9 +231,10 @@ class SyncOpsEngine {
         }
 
         // 无冲突：直接更新
+        const validatedMeta = assertMetadata(data.metadata || {}, 'syncOps.applyOp:RESOURCE_UPDATED');
         await this.db.run(
           `UPDATE resources SET hash = ?, metadata = ?, updated = ? WHERE rid = ? AND deleted = 0`,
-          [data.new_hash, JSON.stringify(data.metadata || {}), opTimestamp, rid]
+          [data.new_hash, JSON.stringify(validatedMeta), opTimestamp, rid]
         );
         break;
       }
@@ -280,9 +287,10 @@ class SyncOpsEngine {
         if (local) {
           const meta = typeof local.metadata === 'string' ? JSON.parse(local.metadata) : local.metadata;
           meta.tags = data.tags;
+          const validatedMeta = assertMetadata(meta, 'syncOps.applyOp:RESOURCE_TAGGED');
           await this.db.run(
             `UPDATE resources SET metadata = ?, updated = ? WHERE rid = ?`,
-            [JSON.stringify(meta), opTimestamp, rid]
+            [JSON.stringify(validatedMeta), opTimestamp, rid]
           );
         }
         break;
