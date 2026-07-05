@@ -457,6 +457,7 @@ route('POST', '/api/notes', async (req, res, { repo }) => {
   const mergedMetadata = { ...metadata };
   if (body.title && !mergedMetadata.title) mergedMetadata.title = body.title;
   if (body.tags && !mergedMetadata.tags) mergedMetadata.tags = body.tags;
+  if (body.category && !mergedMetadata.category) mergedMetadata.category = body.category;
 
   try {
     const result = await repo.createResource(type, actualContent, {
@@ -508,7 +509,7 @@ route('PUT', '/api/notes/:rid', async (req, res, { repo, url }) => {
       }
     }
 
-    // 用户显式传入的 metadata/title/tags 覆盖 refresh 结果
+    // 用户显式传入的 metadata/title/tags/category 覆盖 refresh 结果
     if (body.metadata !== undefined) {
       updates.metadata = { ...(updates.metadata || resource.metadata || {}), ...body.metadata };
     }
@@ -517,6 +518,9 @@ route('PUT', '/api/notes/:rid', async (req, res, { repo, url }) => {
     }
     if (body.tags !== undefined) {
       updates.metadata = { ...(updates.metadata || resource.metadata || {}), tags: body.tags };
+    }
+    if (body.category !== undefined) {
+      updates.metadata = { ...(updates.metadata || resource.metadata || {}), category: body.category };
     }
 
     if (Object.keys(updates).length > 0) {

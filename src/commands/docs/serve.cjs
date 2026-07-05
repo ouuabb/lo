@@ -102,11 +102,11 @@ module.exports = function() {
     │        │                      │  ?type=note&limit=20&offset=0 │
     │  GET   │  /api/notes/:rid     │  资源详情（含解密后的内容）    │
     │  POST  │  /api/notes          │  创建资源（文本内容）          │
-    │        │                      │  {title, content, type, tags} │
+    │        │                      │  {title, content, type, tags, category} │
     │  POST  │  /api/notes/upload   │  上传文件（multipart）         │
     │        │                      │  file + title + tags 字段     │
     │  PUT   │  /api/notes/:rid     │  更新资源                     │
-    │        │                      │  {content, title, tags}      │
+    │        │                      │  {content, title, tags, category}      │
     │  DELETE│  /api/notes/:rid     │  删除（?hard=true 硬删除）     │
     │  GET   │  /api/search         │  搜索 ?q=关键词               │
     │  GET   │  /api/tags           │  所有标签列表                  │
@@ -143,7 +143,7 @@ module.exports = function() {
       curl -X POST \\
            -H "Authorization: Bearer <session-token>" \\
            -H "Content-Type: application/json" \\
-           -d '{"title":"新笔记","content":"内容...","tags":["test"]}' \\
+           -d '{"title":"新笔记","content":"内容...","tags":["test"],"category":"编程"}' \\
            http://127.0.0.1:8765/api/notes
 
       # 上传文件
