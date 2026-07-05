@@ -90,7 +90,22 @@ module.exports = async function edit(argv) {
       try {
         const repo2 = new Repository(process.cwd());
         await repo2.open({ skipAuth: true });
-        await repo2.resourceService.refresh(resource.rid);
+        const refreshed = await repo2.resourceService.refresh(resource.rid);
+
+        // 记录操作日志（同步到远程）
+        if (repo2.syncOps) {
+          await repo2.syncOps.recordOp(
+            require('../repo/syncOps.cjs').OP_TYPES.RESOURCE_UPDATED,
+            resource.rid,
+            {
+              path: path.relative(repo2.repoPath, resource.path),
+              old_hash: resource.hash,
+              new_hash: refreshed.hash,
+              metadata: refreshed.metadata
+            }
+          );
+        }
+
         Logger.success(`元数据已同步: ${resource.rid}`);
         await repo2.close();
       } catch (e) {

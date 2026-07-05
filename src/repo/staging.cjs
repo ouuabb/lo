@@ -200,11 +200,27 @@ class StagingArea {
   async commit(repository) {
     const staging = await this._load();
     const results = { added: 0, updated: 0, deleted: 0, renamed: 0, metadata: 0 };
+    const syncOps = repository.syncOps;
+    const SyncOpsEngine = syncOps
+      ? require('./syncOps.cjs')
+      : null;
 
     for (const relPath of staging.added) {
       const absPath = path.join(this.resourcesPath, relPath);
       if (await fs.pathExists(absPath)) {
-        await repository.resourceService.importFile(absPath);
+        const resource = await repository.resourceService.importFile(absPath);
+        if (syncOps && resource) {
+          const relResourcePath = path.relative(repository.repoPath, resource.path);
+          await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+            type: resource.type,
+            path: relResourcePath,
+            hash: resource.hash,
+            metadata: resource.metadata,
+            encrypted: resource.encrypted,
+            created: resource.created,
+            updated: resource.updated
+          });
+        }
         results.added++;
       }
     }
@@ -214,11 +230,33 @@ class StagingArea {
       if (await fs.pathExists(absPath)) {
         const existing = await repository.resourceService.getByPath(absPath);
         if (existing) {
-          await repository.resourceService.refresh(existing.rid);
+          const oldHash = existing.hash;
+          const refreshed = await repository.resourceService.refresh(existing.rid);
+          if (syncOps) {
+            const relResourcePath = path.relative(repository.repoPath, existing.path);
+            await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_UPDATED, existing.rid, {
+              path: relResourcePath,
+              old_hash: oldHash,
+              new_hash: refreshed.hash,
+              metadata: refreshed.metadata
+            });
+          }
           results.updated++;
         } else {
           // 文件不在库中，降级为 import
-          await repository.resourceService.importFile(absPath);
+          const resource = await repository.resourceService.importFile(absPath);
+          if (syncOps && resource) {
+            const relResourcePath = path.relative(repository.repoPath, resource.path);
+            await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+              type: resource.type,
+              path: relResourcePath,
+              hash: resource.hash,
+              metadata: resource.metadata,
+              encrypted: resource.encrypted,
+              created: resource.created,
+              updated: resource.updated
+            });
+          }
           results.added++;
         }
       }
@@ -229,6 +267,14 @@ class StagingArea {
       const existing = await repository.resourceService.getByPath(absPath);
       if (existing) {
         await repository.resourceService.delete(existing.rid, true);
+        if (syncOps) {
+          const relResourcePath = path.relative(repository.repoPath, existing.path);
+          await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_DELETED, existing.rid, {
+            path: relResourcePath,
+            type: existing.type,
+            hash: existing.hash
+          });
+        }
         results.deleted++;
       }
     }
@@ -238,7 +284,15 @@ class StagingArea {
       const newPath = path.join(this.resourcesPath, rename.new);
       const existing = await repository.resourceService.getByPath(oldPath);
       if (existing) {
+        const oldRelPath = path.relative(repository.repoPath, oldPath);
+        const newRelPath = path.relative(repository.repoPath, newPath);
         await repository.resourceService.update(existing.rid, { path: newPath });
+        if (syncOps) {
+          await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_MOVED, existing.rid, {
+            old_path: oldRelPath,
+            new_path: newRelPath
+          });
+        }
         results.renamed++;
       }
     }
@@ -251,6 +305,16 @@ class StagingArea {
           const merged = { ...resource.metadata, ...meta };
           delete merged.rid; // rid 不应存在于 metadata 中
           await repository.resourceService.update(meta.rid, { metadata: merged });
+          if (syncOps) {
+            const relResourcePath = path.relative(repository.repoPath, resource.path);
+            const refreshed = await repository.resourceService.getByRid(meta.rid);
+            await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_UPDATED, meta.rid, {
+              path: relResourcePath,
+              old_hash: resource.hash,
+              new_hash: refreshed.hash,
+              metadata: refreshed.metadata
+            });
+          }
           results.metadata++;
         }
       }

@@ -240,6 +240,21 @@ class Repository {
 
   async importFile(filePath, type = null) {
     const resource = await this.resourceService.importFile(filePath, type);
+
+    // 记录操作日志
+    if (this.syncOps && resource) {
+      const relPath = path.relative(this.repoPath, resource.path);
+      await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+        type: resource.type,
+        path: relPath,
+        hash: resource.hash,
+        metadata: resource.metadata,
+        encrypted: resource.encrypted,
+        created: resource.created,
+        updated: resource.updated
+      });
+    }
+
     // 如果是 .md 文件，自动解析并同步 [[...]] wikilink
     if (resource && resource.path.toLowerCase().endsWith('.md')) {
       try { await this.syncWikilinks(resource.rid); } catch (e) {}
