@@ -23,6 +23,15 @@ module.exports = async function newResource(argv) {
 
     const repo = new Repository(process.cwd());
     await repo.open({ skipAuth: true });
+
+    // 默认分类：未显式指定时，根据资源类型应用默认值
+    let finalCategory = category;
+    if (!finalCategory) {
+      const defaultNote = await repo.getConfig('category.defaultNote', '未分类');
+      const defaultOther = await repo.getConfig('category.defaultOther', '其他资源');
+      finalCategory = (type === 'note') ? defaultNote : defaultOther;
+    }
+
     const cryptoKey = repo.cryptoKey;
     const encryptionEnabled = CryptoUtils.isEncryptionEnabled(process.cwd());
 
@@ -43,7 +52,7 @@ module.exports = async function newResource(argv) {
     try {
       const metadata = { title };
       if (tagList.length > 0) metadata.tags = tagList;
-      if (category) metadata.category = category;
+      if (finalCategory) metadata.category = finalCategory;
 
       await repo.resourceService.create({
         type,
@@ -60,7 +69,7 @@ module.exports = async function newResource(argv) {
 
     Logger.info('标题:', title);
     Logger.info('类型:', type);
-    if (category) Logger.info('分类:', category);
+    if (finalCategory) Logger.info('分类:', finalCategory);
     Logger.info('位置:', filePath);
 
     process.exit(0);

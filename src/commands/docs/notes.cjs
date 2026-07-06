@@ -85,7 +85,7 @@ module.exports = function() {
   │  title         │  string      │  从 # heading 提取，非空字符串   │
   │  wordCount     │  number      │  词数统计，整数 >= 0             │
   │  tags          │  string[]    │  标签列表，元素为非空字符串       │
-  │  category      │  string|null │  分类，空字符串自动转为 null      │
+  │  category      │  string|null │  分类（路径式多级，如"编程/Python"，空字符串→null）│
   │  status        │  string      │  draft / published / archived    │
   │  conflict      │  boolean     │  同步冲突标记（系统自动设置）     │
   │  original_rid  │  string      │  冲突来源 RID（以 res_ 开头）    │
@@ -252,18 +252,33 @@ module.exports = function() {
     console.log(`
   标签 (Tags) 和分类 (Category) 是两种不同的组织方式：
 
-  ┌──────────┬────────────────────┬─────────────────────┐
-  │  维度     │  标签 (tag)         │  分类 (category)     │
-  ├──────────┼────────────────────┼─────────────────────┤
-  │  数量     │  多条（数组）       │  一条（唯一）         │
-  │  含义     │  交叉维度、自由标注  │  归属、文件夹式分类    │
-  │  类比     │  Gmail 标签         │  文件夹              │
-  │  命令     │  lo tag add/rm/list │  lo category set/rm  │
-  └──────────┴────────────────────┴─────────────────────┘
+  ┌──────────┬────────────────────┬───────────────────────────┐
+  │  维度     │  标签 (tag)         │  分类 (category)           │
+  ├──────────┼────────────────────┼───────────────────────────┤
+  │  数量     │  多条（数组）       │  一条（唯一）               │
+  │  含义     │  交叉维度、自由标注  │  归属、文件夹式层级分类      │
+  │  类比     │  Gmail 标签         │  文件路径 (父/子/孙)       │
+  │  命令     │  lo tag add/rm/list │  lo category set/rm/list   │
+  │          │                    │       /tree                 │
+  └──────────┴────────────────────┴───────────────────────────┘
+
+  分类支持多级层级（用 / 分隔）：
+    - 单级: 编程
+    - 多级: 编程/Python/爬虫
+    - lo category tree 以树形图展示父子层级关系
+
+  默认分类（自动分配）：
+    - 笔记类型（note）创建时自动归入默认分类，默认为 "未分类"
+    - 非笔记类型（图片、PDF 等）自动归入 "其他资源"
+    - 可通过 lo config 修改默认值:
+        lo config add category.defaultNote "我的笔记"
+        lo config add category.defaultOther "附件"
+    - 显式指定 --category 时始终优先于默认值
 
   使用建议：
     - 标签: 用于跨分类的主题标注，如 "前端"、"性能优化"、"待复习"
-    - 分类: 用于笔记的归属目录，如 "编程"、"读书笔记"、"项目文档"
+    - 分类: 用于笔记的层级归属，如 "编程/Python"、"读书笔记/文学"
+    - 多级分类适合精细化组织，但不宜过深（建议 1-3 级）
 
   内联标签语法（在笔记内容中）：
     在笔记正文中写 #标签名 即可创建标签
@@ -271,13 +286,17 @@ module.exports = function() {
     lo sync 会自动从内容中提取标签并写入数据库
 
   操作示例：
-    lo tag add res_abc 前端       为笔记添加"前端"标签
-    lo tag rm res_abc 性能优化     移除"性能优化"标签
-    lo tag list res_abc           列出笔记的所有标签
-    lo category set res_abc 编程   将笔记归入"编程"分类
-    lo category rm res_abc        移除笔记的分类
-    lo list --tag 前端            列出所有带"前端"标签的笔记
-    lo list --category 编程       列出所有"编程"分类的笔记`);
+    lo tag add res_abc 前端              为笔记添加"前端"标签
+    lo tag rm res_abc 性能优化            移除"性能优化"标签
+    lo tag list res_abc                  列出笔记的所有标签
+    lo category set res_abc 编程          将笔记归入"编程"分类
+    lo category set res_abc 编程/Python   归入多级分类
+    lo category rm res_abc               移除笔记的分类
+    lo category list res_abc             查看当前分类
+    lo category list                     列出所有分类（扁平）
+    lo category tree                     树形展示父子层级
+    lo list --tag 前端                   列出所有带"前端"标签的笔记
+    lo list --category 编程              列出所有"编程"分类的笔记`);
 
     console.log(chalk.bold.yellow('\n  六、笔记的 CRUD 操作'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
@@ -290,8 +309,9 @@ module.exports = function() {
   │  创建   │  lo new "标题"        │  创建一篇新笔记               │
   │        │  lo new "标题" --tags  │  创建时指定标签              │
   │        │      "前端,React"      │                              │
-  │        │  lo new "标题"         │  创建时指定分类目录          │
-  │        │      --category 编程   │                              │
+  │        │  lo new "标题"         │  创建时指定多级分类          │
+  │        │      --category 编程/   │                              │
+  │        │      Python/爬虫        │                              │
   │        │  lo new "标题"         │  使用自定义模板              │
   │        │      --template daily  │                              │
   │        │  lo import path/to/    │  从外部导入 .md 文件         │
@@ -512,9 +532,10 @@ module.exports = function() {
     console.log(chalk.bold.yellow('\n  十二、常用命令速查'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
-    lo new "标题"                   创建笔记
+    lo new "标题"                   创建笔记（自动默认分类）
     lo new "标题" --tags "a,b"      创建笔记并添加标签
-    lo new "标题" --category 分类    创建笔记并设置分类
+    lo new "标题" --category 编程/   创建笔记并设置多级分类
+    Python/爬虫
     lo daily                        创建今日日记
     lo list                         列出最近 20 条笔记
     lo list --status draft          列出草稿
@@ -526,7 +547,11 @@ module.exports = function() {
     lo delete res_xxx               删除笔记
     lo import path/to/file.md       导入笔记
     lo tag add res_xxx 标签名       添加标签
-    lo category set res_xxx 分类    设置分类
+    lo category set res_xxx 编程     设置分类
+    lo category set res_xxx 编程/    设置多级分类
+    Python
+    lo category list                列出所有分类
+    lo category tree                树形展示分类层级
     lo sync                         同步文件到数据库
     lo sync --wikilinks             同步并重建 wikilink
     lo link res_a res_b             建立笔记间链接

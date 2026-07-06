@@ -63,7 +63,7 @@ cli
       });
   }, init)
 
-  .command('import <path>', '导入资源', (yargs) => {
+  .command('import <path>', '导入资源（自动应用默认分类）', (yargs) => {
     yargs
       .positional('path', {
         type: 'string',
@@ -72,6 +72,10 @@ cli
       .option('type', {
         type: 'string',
         description: '资源类型 (note, image, pdf, etc.)'
+      })
+      .option('category', {
+        type: 'string',
+        description: '分类（支持多级: 父/子/孙）'
       });
   }, importCmd)
 
@@ -193,7 +197,7 @@ cli
     yargs
       .positional('action', {
         type: 'string',
-        choices: ['set', 'rm', 'list']
+        choices: ['set', 'rm', 'list', 'tree']
       })
       .positional('rid', {
         type: 'string',

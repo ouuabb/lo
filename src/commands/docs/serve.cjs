@@ -103,6 +103,7 @@ module.exports = function() {
     │  GET   │  /api/notes/:rid     │  资源详情（含解密后的内容）    │
     │  POST  │  /api/notes          │  创建资源（文本内容）          │
     │        │                      │  {title, content, type, tags, category} │
+    │        │                      │  category 支持多级: 编程/Python/爬虫     │
     │  POST  │  /api/notes/upload   │  上传文件（multipart）         │
     │        │                      │  file + title + tags 字段     │
     │  PUT   │  /api/notes/:rid     │  更新资源                     │
@@ -143,7 +144,7 @@ module.exports = function() {
       curl -X POST \\
            -H "Authorization: Bearer <session-token>" \\
            -H "Content-Type: application/json" \\
-           -d '{"title":"新笔记","content":"内容...","tags":["test"],"category":"编程"}' \\
+           -d '{"title":"新笔记","content":"内容...","tags":["test"],"category":"编程/Python/爬虫"}' \\
            http://127.0.0.1:8765/api/notes
 
       # 上传文件
