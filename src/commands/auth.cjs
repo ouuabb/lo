@@ -100,6 +100,13 @@ async function handleAdd(keyPath, label, ttl) {
 
     if (keyPath) {
       const resolvedPath = path.resolve(keyPath);
+
+      if (!resolvedPath.endsWith('.pub')) {
+        Logger.error('请传入公钥文件（.pub 结尾），不要传私钥');
+        Logger.info(`  示例: lo auth add -k "${resolvedPath}.pub" -l "我的电脑"`);
+        process.exit(1);
+      }
+
       if (!fs.existsSync(resolvedPath)) {
         Logger.error(`密钥文件不存在: ${resolvedPath}`);
         process.exit(1);

@@ -34,10 +34,19 @@ class SshAuth {
    */
   static isAvailable() {
     try {
-      execSync('ssh-keygen -?', { stdio: 'ignore', windowsHide: true });
+      execFileSync('ssh-keygen', [], {
+        stdio: 'pipe',
+        windowsHide: true
+      });
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      if (e?.code === 'ENOENT') {
+        return false; // 未安装
+      }
+      if (e?.code === 'EACCES') {
+        return false; // 无执行权限
+      }
+      return true; // 其它错误说明程序已启动
     }
   }
 
@@ -46,14 +55,15 @@ class SshAuth {
    */
   static supportsYSign() {
     try {
-      const out = execSync('ssh-keygen -Y sign 2>&1 || true', {
+      execFileSync('ssh-keygen', ['-Y', 'sign'], {
         stdio: 'pipe',
         windowsHide: true,
-        encoding: 'utf8'
+        timeout: 5000
       });
-      return !out.includes('unknown option') && !out.includes('illegal option');
-    } catch {
-      return false;
+      return true;
+    } catch (e) {
+      const stderr = (e.stderr || '').toString();
+      return !stderr.includes('unknown option') && !stderr.includes('illegal option');
     }
   }
 
@@ -382,7 +392,7 @@ class SshAuth {
             execFileSync('ssh-keygen', ['-Y', 'sign', '-f', localMatch.privateKeyPath, '-n', namespace, challengeFile],
               { stdio: 'pipe', windowsHide: true, timeout: 30000 }
             );
-            execFileSync('ssh-keygen', ['-Y', 'verify', '-f', allowedSignersFile, '-n', namespace, '-s', sigFile],
+            execFileSync('ssh-keygen', ['-Y', 'verify', '-f', allowedSignersFile, '-I', 'lo-cli', '-n', namespace, '-s', sigFile],
               { stdio: 'pipe', windowsHide: true, timeout: 15000, input: nonce }
             );
           } else {
@@ -425,7 +435,7 @@ class SshAuth {
       );
 
       // 验证签名
-      execFileSync('ssh-keygen', ['-Y', 'verify', '-f', allowedSignersFile, '-n', namespace, '-s', sigFile],
+      execFileSync('ssh-keygen', ['-Y', 'verify', '-f', allowedSignersFile, '-I', 'lo-cli', '-n', namespace, '-s', sigFile],
         {
           stdio: 'pipe',
           windowsHide: true,
