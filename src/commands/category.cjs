@@ -10,6 +10,30 @@ module.exports = async function category(argv) {
     const repo = new Repository(process.cwd());
     await repo.open();
 
+    if (action === 'list' && !rid) {
+      // 列出所有分类
+      const all = await repo.query({ type: 'note' });
+      const categories = new Set();
+      for (const r of all) {
+        const cat = r.metadata?.category;
+        if (cat && cat.trim()) categories.add(cat.trim());
+      }
+      if (categories.size === 0) {
+        Logger.info('暂无分类');
+      } else {
+        Logger.title('所有分类');
+        for (const c of [...categories].sort()) {
+          console.log(`  ${c}`);
+        }
+      }
+      process.exit(0);
+    }
+
+    if (!rid) {
+      Logger.error('请指定资源 RID 或文件路径');
+      process.exit(1);
+    }
+
     let resource;
     
     if (rid.startsWith('res_')) {

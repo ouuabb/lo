@@ -189,7 +189,7 @@ cli
       });
   }, tag)
 
-  .command('category <action> <rid> [category]', '管理分类', (yargs) => {
+  .command('category <action> [rid] [category]', '管理分类', (yargs) => {
     yargs
       .positional('action', {
         type: 'string',
