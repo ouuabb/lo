@@ -22,6 +22,7 @@ const packageJson = require('../../../package.json');
  *   serve        本地 HTTP API 服务
  *   deploy       仓库部署与远程推送
  *   wikilink     [[wikilink]] 双向链接
+ *   soft-delete  软删除与关联数据残留
  *   quickstart   快速上手指南
  */
 
@@ -39,7 +40,8 @@ const SECTIONS = {
   serve: require('./serve.cjs'),
   deploy: require('./deploy.cjs'),
   quickstart: require('./quickstart.cjs'),
-  wikilink: require('./wikilink.cjs')
+  wikilink: require('./wikilink.cjs'),
+  'soft-delete': require('./soft-delete.cjs')
 };
 
 const TOPIC_ALIASES = {
@@ -83,7 +85,13 @@ const TOPIC_ALIASES = {
   links: 'wikilink',
   link: 'wikilink',
   backlinks: 'wikilink',
-  backlink: 'wikilink'
+  backlink: 'wikilink',
+  'soft-delete': 'soft-delete',
+  softdelete: 'soft-delete',
+  soft: 'soft-delete',
+  delete: 'soft-delete',
+  orphan: 'soft-delete',
+  relations: 'soft-delete'
 };
 
 function printIndex() {
@@ -106,6 +114,7 @@ function printIndex() {
     { id: 'serve',      name: '本地 HTTP API',   desc: 'lo serve、REST接口、SSH认证、外部集成' },
     { id: 'deploy',     name: '部署与推送',       desc: '服务器部署、SSH配置、push/pull/clone、API推送、自动化' },
     { id: 'wikilink',   name: '[[wikilink]] 双向链接', desc: '笔记间双向引用、别名语法、与 sync 的协作、数据模型' },
+    { id: 'soft-delete', name: '软删除与关联数据残留', desc: '资源软删除后 relations 的行为、API 差异、可视化影响、设计理由' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
 
