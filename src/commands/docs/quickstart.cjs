@@ -29,6 +29,16 @@ module.exports = function() {
   # 7. 备份
   lo backup --dest ~/backups
 
+  # 8. 远程同步
+  lo remote add my-server user@host:~/notes     # 添加远程仓库
+  lo push my-server                             # 推送到远程
+  lo pull my-server                             # 从远程拉取
+
+  # 9. 为已有仓库建立到本地的软链接（可选）
+  lo serve                                      # 启动同步服务（默认 8100 端口）
+  # 在另一台电脑上：
+  lo clone user@host:~/notes ~/my-notes         # 克隆远程仓库到本地
+
   更多信息：
     lo manual <命令名>   查看特定命令的用法
     lo help              查看简洁命令列表`);
