@@ -14,14 +14,7 @@ module.exports = async function show(argv) {
 
     let resource;
     
-    if (rid.startsWith('res_')) {
-      resource = await repo.getResource(rid);
-    } else {
-      resource = await repo.getResourceByPath(rid);
-      if (!resource) {
-        resource = await repo.getResourceByPath(path.join(process.cwd(), rid));
-      }
-    }
+    resource = await repo.resolveResource(rid);
     
     if (!resource) {
       await repo.close();
@@ -41,6 +34,7 @@ module.exports = async function show(argv) {
 
     Logger.title(resource.metadata.title || '未命名资源');
     console.log(chalk.gray(`RID: ${resource.rid}`));
+    console.log(chalk.gray(`名称: ${resource.name || '-'}`));
     console.log(chalk.gray(`类型: ${resource.type}`));
     console.log(chalk.gray(`路径: ${resource.path}`));
     console.log(chalk.gray(`创建时间: ${new Date(resource.created).toLocaleString()}`));

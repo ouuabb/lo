@@ -60,12 +60,29 @@ class QueryEngine {
     return rows.map(row => this._hydrate(row));
   }
 
+  async queryByName(name) {
+    const row = await this.db.get(`
+      SELECT * FROM resources WHERE name = ? AND deleted = 0
+    `, [name]);
+    
+    return row ? this._hydrate(row) : null;
+  }
+
+  async queryByNamePattern(pattern) {
+    const rows = await this.db.all(`
+      SELECT * FROM resources WHERE deleted = 0 AND name LIKE ?
+    `, [`%${pattern}%`]);
+    
+    return rows.map(row => this._hydrate(row));
+  }
+
   async search(query) {
     const escaped = query.replace(/'/g, "''");
     
     const rows = await this.db.all(`
       SELECT * FROM resources 
       WHERE deleted = 0 AND (
+        name LIKE '%${escaped}%' OR
         metadata LIKE '%${escaped}%' OR
         path LIKE '%${escaped}%'
       )

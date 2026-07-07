@@ -23,6 +23,8 @@ const packageJson = require('../../../package.json');
  *   deploy       仓库部署与远程推送
  *   wikilink     [[wikilink]] 双向链接
  *   soft-delete  软删除与关联数据残留
+ *   stack        资源栈机制（同名冲突自动冗余）
+ *   rid          RID 一等公民机制
  *   quickstart   快速上手指南
  */
 
@@ -41,7 +43,9 @@ const SECTIONS = {
   deploy: require('./deploy.cjs'),
   quickstart: require('./quickstart.cjs'),
   wikilink: require('./wikilink.cjs'),
-  'soft-delete': require('./soft-delete.cjs')
+  'soft-delete': require('./soft-delete.cjs'),
+  stack: require('./stack.cjs'),
+  rid: require('./rid.cjs')
 };
 
 const TOPIC_ALIASES = {
@@ -52,7 +56,6 @@ const TOPIC_ALIASES = {
   concept: 'concepts',
   philosophy: 'concepts',
   design: 'concepts',
-  rid: 'concepts',
   resource: 'concepts',
   architecture: 'architecture',
   arch: 'architecture',
@@ -91,7 +94,14 @@ const TOPIC_ALIASES = {
   soft: 'soft-delete',
   delete: 'soft-delete',
   orphan: 'soft-delete',
-  relations: 'soft-delete'
+  relations: 'soft-delete',
+  stack: 'stack',
+  stacks: 'stack',
+  layer: 'stack',
+  rid: 'rid',
+  uid: 'rid',
+  id: 'rid',
+  identifier: 'rid'
 };
 
 function printIndex() {
@@ -115,6 +125,8 @@ function printIndex() {
     { id: 'deploy',     name: '部署与推送',       desc: '服务器部署、SSH配置、push/pull/clone、API推送、自动化' },
     { id: 'wikilink',   name: '[[wikilink]] 双向链接', desc: '笔记间双向引用、别名语法、与 sync 的协作、数据模型' },
     { id: 'soft-delete', name: '软删除与关联数据残留', desc: '资源软删除后 relations 的行为、API 差异、可视化影响、设计理由' },
+    { id: 'stack',       name: '资源栈机制',       desc: '同名资源冲突自动冗余、layer 逻辑分层、stack 命令操作' },
+    { id: 'rid',         name: 'RID 一等公民',       desc: 'RID 唯一标识、三级查找机制、name 与 RID 的关系' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
 

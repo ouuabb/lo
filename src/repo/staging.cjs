@@ -231,6 +231,8 @@ class StagingArea {
         if (syncOps && resource) {
           const relResourcePath = path.relative(repository.repoPath, resource.path);
           await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+            name: resource.name,
+            layer: resource.layer || 0,
             type: resource.type,
             path: relResourcePath,
             hash: resource.hash,
@@ -267,6 +269,8 @@ class StagingArea {
           if (syncOps && resource) {
             const relResourcePath = path.relative(repository.repoPath, resource.path);
             await syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+              name: resource.name,
+              layer: resource.layer || 0,
               type: resource.type,
               path: relResourcePath,
               hash: resource.hash,

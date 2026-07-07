@@ -41,11 +41,16 @@ const SECTIONS = {
     title: 'new — 创建新资源',
     usage: 'lo new <标题> [--type <类型>] [--tags <标签>] [--category <分类>]',
     description: [
-      '创建新的资源文件并自动注册到仓库数据库。',
+      '创建新的资源文件（不入库，入库在 lo add + lo commit 时完成）。',
       '',
-      '文件命名: 生成格式为 YYYY-MM-DD-标题.md 的文件名',
+      'rid 一等公民: 创建时不生成 rid，rid 在首次 commit 时分配。',
+      '所有后续操作以 rid 为第一主键，支持 rid / name / path 三级查找。',
+      '',
+      '同名处理: 如果已有同名活跃资源（layer=0），新文件将自动入栈（layer>=1）。',
+      '使用 lo stack 命令管理栈中副本。',
+      '',
+      '文件命名: YYYY-MM-DD-标题-随机8位.md（防止磁盘同名冲突）',
       '存储位置: resources/ 目录',
-      '自动注册: 创建文件的同时写入 SQLite 数据库，tags 和 category 立即生效',
       '加密行为: 如果仓库已启用加密，文件自动以 LOEC 格式加密存储',
       '',
       '默认分类:',
@@ -67,9 +72,9 @@ const SECTIONS = {
       '  lo new "爬虫技巧" --category 编程/Python/爬虫     # 多级分类',
       '  lo new "周一计划" --category "工作/周报"           # 指定分类',
       '',
-      '注意: 创建后资源已存在于数据库，lo add 时会识别为"已修改"',
+      '注意: 创建后文件在磁盘但不入库，lo add + lo commit 时才分配 rid 并入栈',
       '',
-      '相关命令: lo add, lo commit, lo config, lo category'
+      '相关命令: lo add, lo commit, lo stack, lo config, lo category'
     ]
   },
 
@@ -81,6 +86,7 @@ const SECTIONS = {
       '',
       '导入单个文件: 将文件复制到 resources/ 并注册到数据库',
       '导入目录: 递归扫描目录中的支持文件并批量导入',
+      '同名冲突: 导入资源若与已有活跃资源同名，自动入栈（分配下一个空闲 layer），不覆盖已有数据',
       '加密行为: 导入的文件会自动以 LOEC 格式加密存储',
       '',
       '默认分类: 与 lo new 一样，笔记归入默认分类（"未分类"），其他类型归入"其他资源"',
@@ -125,11 +131,15 @@ const SECTIONS = {
 
   show: {
     title: 'show — 查看资源内容',
-    usage: 'lo show <rid|文件路径> [--raw]',
+    usage: 'lo show <rid|name|文件路径> [--raw]',
     description: [
       '显示资源的详细信息和解密后的内容。',
       '',
-      'RID: 资源唯一标识符（如 res_abc123），可通过 lo list 获取',
+      '三级查找: rid 精确匹配 > name 查找活跃层 > path 降级匹配。',
+      '按 name 查找时只返回活跃层（layer=0），栈中资源需通过 rid 访问。',
+      '',
+      'RID: 资源唯一标识符（如 res_abc123_xxxxxxxx），可通过 lo list 获取',
+      'name: 资源逻辑名称，全局唯一（活跃层）',
       '路径: 支持绝对路径或相对于仓库根目录的路径',
       '加密文件: 自动解密后显示明文内容',
       '',
@@ -138,10 +148,11 @@ const SECTIONS = {
       '',
       '示例:',
       '  lo show res_abc123                               # 按 RID 查看',
+      '  lo show 笔记测试                                  # 按 name 查看',
       '  lo show "resources/2024-01-01-笔记.md"            # 按路径查看',
       '  lo show res_abc123 --raw                          # 查看原始内容',
       '',
-      '相关命令: lo edit'
+      '相关命令: lo edit, lo docs rid'
     ]
   },
 
@@ -454,6 +465,7 @@ const SECTIONS = {
       '',
       '检测内容:',
       '  - 新文件: 自动导入到数据库，.md 文件自动解析 [[wikilink]]',
+      '  - 同名冲突: 自动入栈（分配下一个空闲 layer），不覆盖已有资源',
       '  - 修改文件: 更新数据库中对应的散列值，.md 文件自动更新 wikilink',
       '  - 重命名: 匹配删除和新增的 hash，自动识别并保留 RID（wikilink 不受影响）',
       '  - 删除文件: 标记数据库记录为已删除',
@@ -540,6 +552,7 @@ const SECTIONS = {
       '冲突处理:',
       '  - 同一资源两边都编辑了 → 保留远程版本，本地另存为 .conflict',
       '  - 远程删除但本地有编辑 → 保留本地版本',
+      '  - 远程新建资源与本地同名 → 自动入栈（layer>=1），不覆盖本地活跃资源',
       '  - 正常操作 → 直接应用',
       '',
       '远程地址格式:（同 push）',
@@ -709,6 +722,37 @@ const SECTIONS = {
       '  lo find "闭包"                            # 搜索关键词',
       '  lo find "React" --type note               # 搜索笔记',
       '  lo find "分布式" --limit 20               # 限制结果数'
+    ]
+  },
+
+  stack: {
+    title: 'stack — 管理资源栈',
+    usage: 'lo stack <list|pop|drop> [name] [layer]',
+    description: [
+      '管理同名资源冲突时自动保存的冗余副本（栈层）。',
+      '',
+      '核心概念:',
+      '  每个资源名称最多可有 20 层（layer 0~19）。',
+      '  layer 0 为活跃层（日常操作默认使用的版本），',
+      '  layer 1~19 为栈层（自动冗余备份）。',
+      '',
+      '自动入栈: 任意入口（lo new、拖文件、lo sync）遇到同名资源时，',
+      '  新文件会自动分配到下一个空闲栈层，无需手动干预。',
+      '',
+      '栈隔离: 日常操作（show/edit/delete/tag/link）默认只操作活跃层，',
+      '  栈中资源不影响正常使用。通过 rid 可直接操作任意层。',
+      '',
+      '子命令:',
+      '  list                列出所有栈中资源，按 name 分组显示',
+      '  pop  <name>         弹出栈顶，提升为活跃层（原活跃层入栈）',
+      '  drop <name> <layer> 丢弃指定栈层（硬删除）',
+      '',
+      '示例:',
+      '  lo stack list                        # 查看所有栈中资源',
+      '  lo stack pop 笔记测试                  # 将栈顶提升为活跃',
+      '  lo stack drop 笔记测试 1               # 丢弃 layer 1',
+      '',
+      '相关命令: lo new, lo sync, lo docs stack'
     ]
   },
 
@@ -910,7 +954,7 @@ function printOverview() {
   const categories = [
     { name: '基础命令', cmds: ['init', 'new', 'import', 'list', 'show', 'edit', 'delete'] },
     { name: '版本控制', cmds: ['add', 'commit', 'reset', 'diff', 'log', 'status', 'rm'] },
-    { name: '资源管理', cmds: ['link', 'unlink', 'move', 'tag', 'category', 'sync'] },
+    { name: '资源管理', cmds: ['link', 'unlink', 'move', 'tag', 'category', 'sync', 'stack'] },
     { name: '远程同步', cmds: ['remote', 'push', 'pull', 'clone', 'serve'] },
     { name: '搜索与查询', cmds: ['find', 'stats', 'index'] },
     { name: '安全', cmds: ['auth'] },

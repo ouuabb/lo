@@ -16,14 +16,7 @@ module.exports = async function edit(argv) {
 
     let resource;
 
-    if (rid.startsWith('res_')) {
-      resource = await repo.getResource(rid);
-    } else {
-      resource = await repo.getResourceByPath(rid);
-      if (!resource) {
-        resource = await repo.getResourceByPath(path.join(process.cwd(), rid));
-      }
-    }
+    resource = await repo.resolveResource(rid);
 
     if (!resource) {
       await repo.close();

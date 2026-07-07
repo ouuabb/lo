@@ -69,8 +69,46 @@ class ResourceService {
     }
   }
 
+  /**
+   * 创建资源（入库）
+   * @param {object} resource
+   * @param {string} resource.type - 资源类型
+   * @param {string} resource.path - 文件路径
+   * @param {string} [resource.rid] - 预生成的 RID（可选，不提供则自动生成）
+   * @param {string} resource.name - 资源逻辑名称（全局唯一）
+   * @param {object} [resource.metadata] - 元数据
+   */
   async create(resource) {
-    const { type, path: filePath, metadata: callerMeta = {} } = resource;
+    const { type, path: filePath, metadata: callerMeta = {}, rid: preRid } = resource;
+    let { name } = resource;
+
+    if (!name) {
+      // 从文件路径推导名称
+      // 去掉日期前缀 (YYYY-MM-DD-) 和随机后缀 (-xxxxxxxx)
+      // 例如: 2026-07-07-我的笔记-a1b2c3d4.md → 我的笔记
+      const basename = path.basename(filePath, path.extname(filePath));
+      name = basename
+        .replace(/^\d{4}-\d{2}-\d{2}-/, '')   // 去掉日期前缀
+        .replace(/-[a-f0-9]{8}$/, '');         // 去掉随机后缀
+    }
+
+    // 确定 layer：同名时自动入栈（layer 1~19），否则 layer 0（活跃）
+    let layer = 0;
+    const active = await this.getByName(name);  // 只查 layer=0
+    if (active) {
+      // 同名冲突 → 找下一个可用栈层级
+      const stack = await this.getStack(name);
+      const usedLayers = new Set(stack.map(r => r.layer));
+      for (let l = 1; l < 20; l++) {
+        if (!usedLayers.has(l)) {
+          layer = l;
+          break;
+        }
+      }
+      if (layer === 0) {
+        throw new Error(`资源名称 "${name}" 栈已满（最多 20 层，含活跃层），无法入栈。请先 lo stack drop 释放空间。`);
+      }
+    }
 
     // 自动提取元数据（title, wordCount, size, mtime），调用方传入的优先级更高
     const extracted = await this._extractMetadata(filePath, type);
@@ -100,15 +138,15 @@ class ResourceService {
     }
 
     const now = Date.now();
-    const rid = RidUtils.generate();
+    const rid = preRid || RidUtils.generate();
     const encrypted = alreadyEncrypted || !!this._cryptoKey;
 
     await this.db.run(`
-      INSERT INTO resources (rid, type, path, hash, metadata, encrypted, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [rid, type, filePath, plainHash, JSON.stringify(metadata), encrypted ? 1 : 0, now, now]);
+      INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(metadata), encrypted ? 1 : 0, now, now]);
 
-    return { rid, type, path: filePath, hash: plainHash, metadata, encrypted, created: now, updated: now };
+    return { rid, name, layer, type, path: filePath, hash: plainHash, metadata, encrypted, created: now, updated: now };
   }
 
   async getByRid(rid) {
@@ -119,6 +157,92 @@ class ResourceService {
     if (!row) return null;
     
     return this._hydrate(row);
+  }
+
+  async getByName(name) {
+    // 默认只返回活跃层（layer=0）
+    const row = await this.db.get(`
+      SELECT * FROM resources WHERE name = ? AND layer = 0 AND deleted = 0
+    `, [name]);
+    
+    if (!row) return null;
+    
+    return this._hydrate(row);
+  }
+
+  async getByNameLayer(name, layer) {
+    const row = await this.db.get(`
+      SELECT * FROM resources WHERE name = ? AND layer = ? AND deleted = 0
+    `, [name, layer]);
+    
+    if (!row) return null;
+    
+    return this._hydrate(row);
+  }
+
+  /**
+   * 获取指定名称的完整栈（所有层，按 layer 排序）
+   * @param {string} name
+   * @returns {Promise<Array>}
+   */
+  async getStack(name) {
+    const rows = await this.db.all(`
+      SELECT * FROM resources WHERE name = ? AND deleted = 0 ORDER BY layer ASC
+    `, [name]);
+    
+    return rows.map(row => this._hydrate(row));
+  }
+
+  /**
+   * 出栈：将栈顶（最小 layer>0）提升为活跃层（layer=0），原活跃层压入栈
+   * @param {string} name
+   * @returns {Promise<object>} 新的活跃层资源
+   */
+  async popFromStack(name) {
+    const stack = await this.getStack(name);
+    if (stack.length < 2) {
+      throw new Error(`资源 "${name}" 栈中没有可弹出的层`);
+    }
+
+    // stack[0] = 活跃层 (layer=0), stack[1] = 栈顶（layer 最小且 >0）
+    const active = stack[0];
+    const top = stack[1];
+    const targetLayer = top.layer; // 栈顶原来的层号
+
+    // 三步交换，避免 UNIQUE(name,layer) 约束冲突：
+    // 1. 活跃层 → 临时负值，释放 layer=0
+    // 2. 栈顶   → layer=0
+    // 3. 旧活跃 → 栈顶原来的层号
+    await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [-1, active.rid]);
+    try {
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [0, top.rid]);
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [targetLayer, active.rid]);
+    } catch (e) {
+      // 回滚：将活跃层恢复到 layer=0
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [0, active.rid]);
+      throw e;
+    }
+
+    return this.getByRid(top.rid);
+  }
+
+  /**
+   * 丢弃指定层
+   * @param {string} name
+   * @param {number} layer - 层号（不能为 0）
+   */
+  async dropLayer(name, layer) {
+    if (layer === 0) {
+      throw new Error('不能丢弃活跃层（layer=0），请先 pop 或 delete');
+    }
+    const resource = await this.getByNameLayer(name, layer);
+    if (!resource) {
+      throw new Error(`资源 "${name}" 的 layer ${layer} 不存在`);
+    }
+    // 硬删除
+    await this.db.run('DELETE FROM resources WHERE rid = ?', [resource.rid]);
+    await this.db.run('DELETE FROM relations WHERE from_rid = ? OR to_rid = ?', [resource.rid, resource.rid]);
+    return { rid: resource.rid, dropped: true };
   }
 
   async getByPath(filePath) {
@@ -143,10 +267,14 @@ class ResourceService {
   }
 
   async getAll(options = {}) {
-    const { type, limit, offset } = options;
+    const { type, limit, offset, activeOnly } = options;
     
     let sql = 'SELECT * FROM resources WHERE deleted = 0';
     const params = [];
+    
+    if (activeOnly) {
+      sql += ' AND layer = 0';
+    }
     
     if (type) {
       sql += ' AND type = ?';
@@ -205,9 +333,17 @@ class ResourceService {
 
   async delete(rid, soft = true) {
     if (soft) {
-      await this.db.run(`
-        UPDATE resources SET deleted = 1, updated = ? WHERE rid = ?
-      `, [Date.now(), rid]);
+      // 软删除前释放名称（追加 rid 后缀），允许同名资源重新创建
+      const resource = await this.getByRid(rid);
+      if (resource && resource.name) {
+        await this.db.run(`
+          UPDATE resources SET name = ?, deleted = 1, updated = ? WHERE rid = ?
+        `, [`${resource.name}_del_${rid.slice(-8)}`, Date.now(), rid]);
+      } else {
+        await this.db.run(`
+          UPDATE resources SET deleted = 1, updated = ? WHERE rid = ?
+        `, [Date.now(), rid]);
+      }
     } else {
       await this.db.run(`
         DELETE FROM resources WHERE rid = ?
@@ -221,20 +357,31 @@ class ResourceService {
     return { rid, deleted: true };
   }
 
-  async importFile(filePath, type = null) {
+  async importFile(filePath, type = null, options = {}) {
+    // 先按路径检查
     const existing = await this.getByPath(filePath);
     if (existing) {
       return existing;
     }
     
     const resourceType = type || ResourceType.fromPath(filePath);
-    
     const metadata = await this._extractMetadata(filePath, resourceType);
+
+    // 推导名称（去掉日期前缀和随机后缀）
+    // 例如: 2026-07-07-我的笔记-a1b2c3d4.md → 我的笔记
+    const basename = path.basename(filePath, path.extname(filePath));
+    let name = basename
+      .replace(/^\d{4}-\d{2}-\d{2}-/, '')   // 去掉日期前缀
+      .replace(/-[a-f0-9]{8}$/, '');         // 去掉随机后缀
+
+    // 重名校验（交给 create 统一报错）
     
     return this.create({
       type: resourceType,
       path: filePath,
-      metadata
+      name,
+      metadata,
+      ...options
     });
   }
 

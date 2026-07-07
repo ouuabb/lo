@@ -11,23 +11,9 @@ module.exports = async function link(argv) {
 
     let resourceA, resourceB;
 
-    if (from.startsWith('res_')) {
-      resourceA = await repo.getResource(from);
-    } else {
-      resourceA = await repo.getResourceByPath(from);
-      if (!resourceA) {
-        resourceA = await repo.getResourceByPath(path.join(process.cwd(), from));
-      }
-    }
+    resourceA = await repo.resolveResource(from);
 
-    if (to.startsWith('res_')) {
-      resourceB = await repo.getResource(to);
-    } else {
-      resourceB = await repo.getResourceByPath(to);
-      if (!resourceB) {
-        resourceB = await repo.getResourceByPath(path.join(process.cwd(), to));
-      }
-    }
+    resourceB = await repo.resolveResource(to);
 
     if (!resourceA) {
       Logger.error(`源资源不存在: ${from}`);

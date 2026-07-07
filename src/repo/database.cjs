@@ -33,6 +33,8 @@ class Database {
     await this.run(`
       CREATE TABLE IF NOT EXISTS resources (
         rid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        layer INTEGER NOT NULL DEFAULT 0,
         type TEXT NOT NULL,
         path TEXT NOT NULL,
         hash TEXT,
@@ -47,6 +49,20 @@ class Database {
     // 数据迁移：为已有仓库添加 encrypted 列
     try {
       await this.run('ALTER TABLE resources ADD COLUMN encrypted INTEGER DEFAULT 0');
+    } catch {
+      // 列已存在，忽略
+    }
+
+    // 数据迁移：为已有仓库添加 name 列（资源逻辑名称，全局唯一）
+    try {
+      await this.run('ALTER TABLE resources ADD COLUMN name TEXT');
+    } catch {
+      // 列已存在，忽略
+    }
+
+    // 数据迁移：为已有仓库添加 layer 列（栈层级，0=活跃，1~19=栈）
+    try {
+      await this.run('ALTER TABLE resources ADD COLUMN layer INTEGER NOT NULL DEFAULT 0');
     } catch {
       // 列已存在，忽略
     }
@@ -68,6 +84,17 @@ class Database {
 
     await this.run(`
       CREATE INDEX IF NOT EXISTS idx_resources_path ON resources(path)
+    `);
+
+    // 删除旧的单列 name 唯一索引（迁移兼容）
+    try {
+      await this.run('DROP INDEX IF EXISTS idx_resources_name');
+    } catch {
+      // 忽略
+    }
+
+    await this.run(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_resources_name_layer ON resources(name, layer)
     `);
 
     await this.run(`

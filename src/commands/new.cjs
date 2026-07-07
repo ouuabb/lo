@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const fs = require('fs-extra');
 const Logger = require('../utils/logger.cjs');
 const StringUtils = require('../utils/string.cjs');
@@ -12,26 +13,34 @@ module.exports = async function newResource(argv) {
   try {
     const slug = StringUtils.slugify(title);
     const date = DateUtils.today();
-    const filename = `${date}-${slug}.md`;
 
-    const tagList = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    // 校验名称全局唯一，同名时自动入栈（layer >= 1）
+    const activeByName = await repo.resourceService.getByName(slug);
+    if (activeByName) {
+      Logger.warn(`资源名称 "${slug}" 已存在活跃层（rid: ${activeByName.rid}），新文件将在提交时自动入栈。`);
+      Logger.info('提示: 使用 lo stack list 查看栈中资源，lo stack pop 可提升为活跃层。');
+    }
+
+    // 文件名含随机后缀，保证磁盘层面永无冲突
+    const randomSuffix = crypto.randomBytes(4).toString('hex');
+    const filename = `${date}-${slug}-${randomSuffix}.md`;
+
+    // 构建元数据
+    const metadata = {
+      title,
+      ...(tags ? { tags: Array.isArray(tags) ? tags : tags.split(/[,，]/).map(s => s.trim()) } : {}),
+      ...(category ? { category } : {})
+    };
 
     const content = `# ${title}\n\n开始写作...\n`;
 
     const filePath = path.join(process.cwd(), 'resources', filename);
     await fs.ensureDir(path.dirname(filePath));
 
-    const repo = new Repository(process.cwd());
-    await repo.open({ skipAuth: true });
-
-    // 默认分类：未显式指定时，根据资源类型应用默认值
-    let finalCategory = category;
-    if (!finalCategory) {
-      const defaultNote = await repo.getConfig('category.defaultNote', '未分类');
-      const defaultOther = await repo.getConfig('category.defaultOther', '其他资源');
-      finalCategory = (type === 'note') ? defaultNote : defaultOther;
-    }
-
+    // 写入文件（自动处理加密）
     const cryptoKey = repo.cryptoKey;
     const encryptionEnabled = CryptoUtils.isEncryptionEnabled(process.cwd());
 
@@ -48,28 +57,11 @@ module.exports = async function newResource(argv) {
       Logger.success(`资源已创建: ${filename}`);
     }
 
-    // 同步写入 SQLite（含 tags/category）
-    try {
-      const metadata = { title };
-      if (tagList.length > 0) metadata.tags = tagList;
-      if (finalCategory) metadata.category = finalCategory;
-
-      await repo.resourceService.create({
-        type,
-        path: filePath,
-        metadata
-      });
-      Logger.success(`资源已入库`);
-      if (tagList.length > 0) Logger.info('标签:', tagList.join(', '));
-    } catch (e) {
-      Logger.warn(`自动入库失败（文件已创建，请手动 lo add）: ${e.message}`);
-    }
-
     await repo.close();
 
     Logger.info('标题:', title);
     Logger.info('类型:', type);
-    if (finalCategory) Logger.info('分类:', finalCategory);
+    if (metadata.category) Logger.info('分类:', metadata.category);
     Logger.info('位置:', filePath);
 
     process.exit(0);

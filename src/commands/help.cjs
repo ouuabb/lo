@@ -3,10 +3,10 @@ const chalk = require('chalk');
 module.exports = function help(argv) {
   console.log('\n' + chalk.bold('基础命令:'));
   console.log('  init          初始化资源仓库');
-  console.log('  new           创建新资源');
+  console.log('  new           创建新资源（以 name/rid 标识，同名自动入栈）');
   console.log('  import        导入资源');
   console.log('  list          列出所有资源');
-  console.log('  show          查看资源');
+  console.log('  show          查看资源（支持 rid / name / path 三级查找）');
   console.log('  edit          编辑资源');
   console.log('  delete        删除资源');
   
@@ -33,6 +33,7 @@ module.exports = function help(argv) {
   console.log('  tag           管理标签');
   console.log('  category      管理分类');
   console.log('  sync          同步资源（含 [[wikilink]] 自动解析，无提交历史）');
+  console.log('  stack         管理资源栈（同名冲突冗余副本，list/pop/drop）');
   
   console.log('\n' + chalk.bold('搜索与查询:'));
   console.log('  find          搜索资源');
@@ -48,7 +49,7 @@ module.exports = function help(argv) {
   console.log('  config        管理配置');
   console.log('  help          查看帮助');
   console.log('  manual        查看命令手册');
-  console.log('  docs          查看功能详解');
+  console.log('  docs          查看功能详解（rid、stack、加密、认证等）');
   
   console.log('\n' + chalk.gray('使用 lo <command> --help 查看详细帮助'));
   console.log(chalk.gray('使用 lo manual 查看命令手册  |  lo docs 查看功能详解'));

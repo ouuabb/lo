@@ -35,6 +35,7 @@ const auth = require('./commands/auth.cjs');
 const remote = require('./commands/remote.cjs');
 const serve = require('./commands/serve.cjs');
 const diff = require('./commands/diff.cjs');
+const stack = require('./commands/stack.cjs');
 const rm = require('./commands/rm.cjs');
 
 const cli = yargs
@@ -461,6 +462,23 @@ cli
         default: 20
       });
   }, log)
+
+  .command('stack [action] [name] [layer]', '管理资源栈（同名冲突的冗余副本）', (yargs) => {
+    yargs
+      .positional('action', {
+        type: 'string',
+        description: '栈操作',
+        choices: ['list', 'pop', 'drop']
+      })
+      .positional('name', {
+        type: 'string',
+        description: '资源名称'
+      })
+      .positional('layer', {
+        type: 'number',
+        description: '栈层级（用于 drop）'
+      });
+  }, stack)
 
   .command('auth <action>', '管理 SSH 身份认证（支持多设备）', (yargs) => {
     yargs

@@ -106,14 +106,7 @@ module.exports = async function category(argv) {
 
     let resource;
 
-    if (rid.startsWith('res_')) {
-      resource = await repo.getResource(rid);
-    } else {
-      resource = await repo.getResourceByPath(rid);
-      if (!resource) {
-        resource = await repo.getResourceByPath(path.join(process.cwd(), rid));
-      }
-    }
+    resource = await repo.resolveResource(rid);
 
     if (!resource) {
       Logger.error(`资源不存在: ${rid}`);

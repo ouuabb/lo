@@ -177,9 +177,11 @@ class SyncOpsEngine {
         if (await fs.pathExists(absPath)) {
           const validatedMeta = assertMetadata(data.metadata || {}, 'syncOps.applyOp:RESOURCE_CREATED');
           await this.db.run(
-            `INSERT OR IGNORE INTO resources (rid, type, path, hash, metadata, encrypted, created, updated, deleted)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-            [rid, data.type, absPath, data.hash,
+            `INSERT OR IGNORE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated, deleted)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+            [rid, data.name || path.basename(data.path || '', path.extname(data.path || '')).replace(/^\d{4}-\d{2}-\d{2}-/, ''),
+             data.layer || 0,
+             data.type, absPath, data.hash,
              JSON.stringify(validatedMeta),
              data.encrypted ? 1 : 0,
              data.created || opTimestamp, data.updated || opTimestamp]
@@ -212,9 +214,9 @@ class SyncOpsEngine {
           );
 
           await this.db.run(
-            `INSERT OR REPLACE INTO resources (rid, type, path, hash, metadata, encrypted, created, updated, deleted)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-            [rid + '_conflict_' + Date.now(), local.type, conflictPath, local.hash,
+            `INSERT OR REPLACE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated, deleted)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+            [rid + '_conflict_' + Date.now(), local.name || '', 0, local.type, conflictPath, local.hash,
              JSON.stringify(conflictMeta),
              local.encrypted ? 1 : 0, local.created, local.updated]
           );

@@ -245,6 +245,8 @@ class Repository {
     if (this.syncOps && resource) {
       const relPath = path.relative(this.repoPath, resource.path);
       await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+        name: resource.name,
+        layer: resource.layer || 0,
         type: resource.type,
         path: relPath,
         hash: resource.hash,
@@ -312,6 +314,8 @@ class Repository {
     if (this.syncOps) {
       const relPath = path.relative(this.repoPath, filePath);
       await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, result.rid, {
+        name: result.name,
+        layer: result.layer || 0,
         type,
         path: relPath,
         hash: result.hash,
@@ -327,6 +331,39 @@ class Repository {
 
   async getResource(rid) {
     return this.resourceService.getByRid(rid);
+  }
+
+  /**
+   * 统一资源解析：rid > name > path 三级查找
+   * rid 是一等公民，优先按 rid 查；其次按 name（逻辑名称）；最后按 path 降级
+   * @param {string} input - 用户输入（可能是 rid、名称或路径）
+   * @returns {Promise<object|null>}
+   */
+  async resolveResource(input) {
+    // 1. 按 rid 精确匹配
+    if (input.startsWith('res_')) {
+      return this.resourceService.getByRid(input);
+    }
+
+    // 2. 按 name 精确匹配（全局唯一）
+    const byName = await this.resourceService.getByName(input);
+    if (byName) return byName;
+
+    // 3. 按路径降级匹配
+    const byPath = await this.resourceService.getByPath(input);
+    if (byPath) return byPath;
+
+    const absPath = path.join(this.repoPath, 'resources', input);
+    if (absPath !== input) {
+      const byAbs = await this.resourceService.getByPath(absPath);
+      if (byAbs) return byAbs;
+    }
+
+    return null;
+  }
+
+  async getResourceByName(name) {
+    return this.resourceService.getByName(name);
   }
 
   async getResourceByPath(filePath) {
@@ -460,7 +497,11 @@ class Repository {
       return null;
     }
 
-    // 2. 按标题匹配
+    // 2. 按 name 精确匹配（全局唯一逻辑名称）
+    const byName = await this.resourceService.getByName(target);
+    if (byName) return byName.rid;
+
+    // 3. 按标题匹配
     const all = await this.resourceService.getAll();
     for (const r of all) {
       if (r.metadata && r.metadata.title === target) {
@@ -468,7 +509,7 @@ class Repository {
       }
     }
 
-    // 3. 按文件路径匹配
+    // 4. 按文件路径匹配
     const resourcesDir = path.join(this.repoPath, 'resources');
     let dirEntries = [];
     try {
@@ -479,7 +520,7 @@ class Repository {
 
     for (const entry of dirEntries) {
       const fullPath = path.join(resourcesDir, entry);
-      // resources/Target.md 或 resources/YYYY-MM-DD-Target.md
+      // resources/Target.md 或 resources/YYYY-MM-DD-Target-xxxxxxxx.md
       if (entry === target + '.md' || entry.endsWith('-' + target + '.md')) {
         try {
           const stat = await fs.stat(fullPath);
@@ -725,6 +766,8 @@ class Repository {
         if (this.syncOps) {
           const relPath = path.relative(this.repoPath, newFile);
           await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+            name: resource.name,
+            layer: resource.layer || 0,
             type: resource.type,
             path: relPath,
             hash: resource.hash,
