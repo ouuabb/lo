@@ -33,8 +33,8 @@ async function rm(argv) {
     ? targetPath
     : path.join(repoPath, targetPath);
 
-  if (!absPath.startsWith(resourcesDir)) {
-    console.log(chalk.red('文件必须在 resources 目录下'));
+  if (!absPath.startsWith(repoPath)) {
+    console.log(chalk.red('文件必须在仓库目录下'));
     await repo.close();
     process.exit(0);
     return;

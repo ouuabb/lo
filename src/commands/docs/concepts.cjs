@@ -62,7 +62,7 @@ module.exports = function() {
   系统也能自动检测未入库文件 lo sync：
  
    lo status         仅检测和报告未跟踪文件，不生成 RID
-   lo sync           扫描 resources/ 目录，自动为未入库文件调用
+   lo sync           扫描仓库目录，自动为未入库文件调用
                      resourceService.importFile() 生成 RID 并入库
 
   lo sync 和 lo add / lo commit 的关系：

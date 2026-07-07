@@ -27,6 +27,7 @@ async function add(argv) {
     console.log(chalk.green(`\n暂存了 ${count} 个文件`));
     if (status.added.length > 0) console.log(`  新增: ${status.added.length}`);
     if (status.modified.length > 0) console.log(chalk.blue(`  修改: ${status.modified.length}`));
+    if (status.deleted.length > 0) console.log(chalk.red(`  删除: ${status.deleted.length}`));
     await repo.close();
     process.exit(0);
     return;
@@ -38,8 +39,8 @@ async function add(argv) {
 
   const relToResources = path.relative(resourcesDir, absPath);
 
-  if (!absPath.startsWith(resourcesDir)) {
-    console.log(chalk.red('文件必须在 resources 目录下'));
+  if (!absPath.startsWith(repoPath)) {
+    console.log(chalk.red('文件必须在仓库目录下'));
     await repo.close();
     process.exit(0);
     return;

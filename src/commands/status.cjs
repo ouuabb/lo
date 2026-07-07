@@ -26,14 +26,17 @@ async function status(argv) {
   const dbResources = await repo.resourceService.getAll();
   const dbPaths = new Map(dbResources.map(r => [r.path, r]));
 
-  const files = await fs.readdir(resourcesDir, { recursive: true });
-  
+  // 扫描整个仓库目录，排除 .repo、node_modules、.git
+  const excludeDirs = ['.repo', 'node_modules', '.git'];
+  const rawFiles = await fs.readdir(repoPath, { recursive: true });
+  const files = rawFiles.filter(f => !excludeDirs.some(d => f.startsWith(d + path.sep) || f === d));
+
   const staged = { added: [], modified: [], deleted: [], renamed: [] };
   const unstaged = { modified: [], deleted: [], renamed: [] };
   const untracked = [];
 
   for (const relPath of stagingStatus.added) {
-    const absPath = path.join(resourcesDir, relPath);
+    const absPath = path.join(repoPath, relPath);
     if (await fs.pathExists(absPath)) {
       if (dbPaths.has(absPath)) {
         staged.modified.push(relPath);
@@ -44,7 +47,7 @@ async function status(argv) {
   }
 
   for (const relPath of stagingStatus.modified) {
-    const absPath = path.join(resourcesDir, relPath);
+    const absPath = path.join(repoPath, relPath);
     if (await fs.pathExists(absPath) && dbPaths.has(absPath)) {
       staged.modified.push(relPath);
     }
@@ -59,13 +62,14 @@ async function status(argv) {
   }
 
   for (const file of files) {
-    const absPath = path.join(resourcesDir, file);
+    const absPath = path.join(repoPath, file);
     const stats = await fs.stat(absPath);
     
     if (!stats.isFile()) continue;
     if (!ResourceType.isSupported(absPath)) continue;
     
-    const isInStaging = stagingStatus.added.includes(file) || 
+    const isInStaging = stagingStatus.added.includes(file) ||
+                        stagingStatus.modified.includes(file) ||
                         stagingStatus.deleted.includes(file);
     
     if (dbPaths.has(absPath) && !isInStaging) {
@@ -84,7 +88,7 @@ async function status(argv) {
 
   for (const [absPath, resource] of dbPaths) {
     if (!await fs.pathExists(absPath)) {
-      const relPath = path.relative(resourcesDir, absPath);
+      const relPath = path.relative(repoPath, absPath);
       if (!stagingStatus.deleted.includes(relPath)) {
         unstaged.deleted.push(relPath);
       }
@@ -99,12 +103,12 @@ async function status(argv) {
   if (unstaged.deleted.length > 0 && untracked.length > 0) {
     const untrackedHashes = new Map();
     for (const uf of untracked) {
-      const absPath = path.join(resourcesDir, uf);
+      const absPath = path.join(repoPath, uf);
       untrackedHashes.set(uf, await HashUtils.fromFile(absPath, repo.cryptoKey));
     }
 
     for (const delRel of unstaged.deleted) {
-      const delAbs = path.join(resourcesDir, delRel);
+      const delAbs = path.join(repoPath, delRel);
       const dbResource = dbPaths.get(delAbs);
       if (!dbResource) {
         actualDeleted.push(delRel);

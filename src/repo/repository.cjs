@@ -571,7 +571,7 @@ class Repository {
     const lastSyncTime = full ? 0 : await this.getLastSyncTime();
     const currentTime = Date.now();
 
-    const files = glob.sync('resources/**/*', {
+    const files = glob.sync('**/*', {
       cwd: this.repoPath,
       ignore: ['**/node_modules/**', '**/.git/**', '**/.repo/**'],
       absolute: true,

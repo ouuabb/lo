@@ -14,7 +14,6 @@ async function diff(argv) {
 
   const staging = new StagingArea(repoPath);
   const stagingStatus = await staging.getStatus();
-  const resourcesDir = path.join(repoPath, 'resources');
 
   // 暂存区变更
   if (stagingStatus.added.length > 0 || stagingStatus.modified.length > 0 ||
@@ -24,7 +23,7 @@ async function diff(argv) {
     console.log('----------');
 
     for (const relPath of stagingStatus.added) {
-      const absPath = path.join(resourcesDir, relPath);
+      const absPath = path.join(repoPath, relPath);
       if (await fs.pathExists(absPath)) {
         console.log(chalk.green(`\n[新增] ${relPath}`));
         await showFilePreview(absPath, repo);
@@ -32,7 +31,7 @@ async function diff(argv) {
     }
 
     for (const relPath of stagingStatus.modified) {
-      const absPath = path.join(resourcesDir, relPath);
+      const absPath = path.join(repoPath, relPath);
       const existing = await repo.resourceService.getByPath(absPath);
       if (existing && await fs.pathExists(absPath)) {
         console.log(chalk.blue(`\n[修改] ${relPath}`));
@@ -66,7 +65,7 @@ async function diff(argv) {
     }
 
     for (const relPath of stagingStatus.deleted) {
-      const absPath = path.join(resourcesDir, relPath);
+      const absPath = path.join(repoPath, relPath);
       const existing = await repo.resourceService.getByPath(absPath);
       console.log(chalk.red(`\n[删除] ${relPath}`));
       if (existing) {
@@ -106,7 +105,9 @@ async function diff(argv) {
   const dbResources = await repo.resourceService.getAll();
   const dbPaths = new Map(dbResources.map(r => [r.path, r]));
 
-  const files = await fs.readdir(resourcesDir, { recursive: true });
+  const excludeDirs = ['.repo', 'node_modules', '.git'];
+  const rawFiles = await fs.readdir(repoPath, { recursive: true });
+  const files = rawFiles.filter(f => !excludeDirs.some(d => f.startsWith(d + path.sep) || f === d));
   const stagedAll = new Set([
     ...stagingStatus.added, ...stagingStatus.modified,
     ...stagingStatus.deleted, ...stagingStatus.renamed.map(r => r.old)
@@ -114,7 +115,7 @@ async function diff(argv) {
 
   let unstagedCount = 0;
   for (const file of files) {
-    const absPath = path.join(resourcesDir, file);
+    const absPath = path.join(repoPath, file);
     const stats = await fs.stat(absPath);
     if (!stats.isFile()) continue;
     if (stagedAll.has(file)) continue;

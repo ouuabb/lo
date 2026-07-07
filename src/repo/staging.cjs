@@ -1,11 +1,11 @@
 const fs = require('fs-extra');
 const path = require('path');
+const ResourceType = require('../utils/resourceType.cjs');
 
 class StagingArea {
   constructor(repoPath) {
     this.repoPath = repoPath;
     this.stagingPath = path.join(repoPath, '.repo', 'staging.json');
-    this.resourcesPath = path.join(repoPath, 'resources');
   }
 
   async _load() {
@@ -77,10 +77,16 @@ class StagingArea {
     const staging = await this._load();
     const existingPaths = new Set([...staging.added, ...staging.modified]);
 
-    const files = await fs.readdir(this.resourcesPath, { recursive: true });
+    // 扫描整个仓库目录，排除 .repo、node_modules、.git
+    const excludeDirs = ['.repo', 'node_modules', '.git'];
+    const files = await fs.readdir(this.repoPath, { recursive: true });
     for (const file of files) {
-      const absPath = path.join(this.resourcesPath, file);
-      const stats = await fs.stat(absPath);
+      // 跳过排除的目录
+      if (excludeDirs.some(d => file.startsWith(d + path.sep) || file === d)) continue;
+      const absPath = path.join(this.repoPath, file);
+      if (!ResourceType.isSupported(absPath)) continue;
+      let stats;
+      try { stats = await fs.stat(absPath); } catch { continue; }
       if (stats.isFile()) {
         const relPath = this._relative(absPath);
         if (!existingPaths.has(relPath)) {
@@ -91,8 +97,21 @@ class StagingArea {
       }
     }
 
+    // 检测已删除的文件：DB 中有记录但磁盘上不存在，且路径在仓库目录内
+    const allResources = await repository.resourceService.getAll();
+    for (const resource of allResources) {
+      const absPath = path.resolve(this.repoPath, resource.path);
+      if (!absPath.startsWith(this.repoPath + path.sep) && absPath !== this.repoPath) continue;
+      if (!await fs.pathExists(absPath)) {
+        const relPath = this._relative(absPath);
+        if (!staging.deleted.includes(relPath)) {
+          await this.remove(absPath);
+        }
+      }
+    }
+
     const updated = await this._load();
-    return updated.added.length + updated.modified.length;
+    return updated.added.length + updated.modified.length + updated.deleted.length;
   }
 
   async remove(filePath) {
@@ -206,7 +225,7 @@ class StagingArea {
       : null;
 
     for (const relPath of staging.added) {
-      const absPath = path.join(this.resourcesPath, relPath);
+      const absPath = path.join(this.repoPath, relPath);
       if (await fs.pathExists(absPath)) {
         const resource = await repository.resourceService.importFile(absPath);
         if (syncOps && resource) {
@@ -226,7 +245,7 @@ class StagingArea {
     }
 
     for (const relPath of staging.modified) {
-      const absPath = path.join(this.resourcesPath, relPath);
+      const absPath = path.join(this.repoPath, relPath);
       if (await fs.pathExists(absPath)) {
         const existing = await repository.resourceService.getByPath(absPath);
         if (existing) {
@@ -263,7 +282,7 @@ class StagingArea {
     }
 
     for (const relPath of staging.deleted) {
-      const absPath = path.join(this.resourcesPath, relPath);
+      const absPath = path.join(this.repoPath, relPath);
       const existing = await repository.resourceService.getByPath(absPath);
       if (existing) {
         await repository.resourceService.delete(existing.rid, true);
@@ -280,8 +299,8 @@ class StagingArea {
     }
 
     for (const rename of staging.renamed) {
-      const oldPath = path.join(this.resourcesPath, rename.old);
-      const newPath = path.join(this.resourcesPath, rename.new);
+      const oldPath = path.join(this.repoPath, rename.old);
+      const newPath = path.join(this.repoPath, rename.new);
       const existing = await repository.resourceService.getByPath(oldPath);
       if (existing) {
         const oldRelPath = path.relative(repository.repoPath, oldPath);
@@ -326,7 +345,7 @@ class StagingArea {
 
   _relative(filePath) {
     if (path.isAbsolute(filePath)) {
-      return path.relative(this.resourcesPath, filePath);
+      return path.relative(this.repoPath, filePath);
     }
     return filePath;
   }

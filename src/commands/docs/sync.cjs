@@ -327,7 +327,7 @@ module.exports = function() {
           （这是本地操作，不涉及远程传输）
 
     执行流程：
-      1. 扫描 resources/ 下所有文件
+      1. 扫描仓库目录下所有文件
       2. 对每个文件：
          - 路径在 DB 中且已跟踪 → 检查 hash 是否变化 → resource_updated
          - 路径不在 DB 中 → 标记为候选新文件
@@ -338,7 +338,7 @@ module.exports = function() {
 
     什么情况下使用：
       - 你通过外部编辑器（VS Code 等）直接编辑了 .md 文件
-      - 你手动在 resources/ 目录下添加/删除/重命名了文件
+      - 你手动在仓库目录下添加/删除/重命名了文件
       - lo push 会自动先执行 lo sync，所以通常不需要手动执行
       - 但如果只做本地管理不推送到远程，lo sync 是必须的`);
 
