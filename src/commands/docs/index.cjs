@@ -25,6 +25,7 @@ const packageJson = require('../../../package.json');
  *   soft-delete  软删除与关联数据残留
  *   stack        资源栈机制（同名冲突自动冗余）
  *   rid          RID 一等公民机制
+ *   operations   操作追踪体系（所有可监听的操作类型与触发来源）
  *   quickstart   快速上手指南
  */
 
@@ -45,7 +46,8 @@ const SECTIONS = {
   wikilink: require('./wikilink.cjs'),
   'soft-delete': require('./soft-delete.cjs'),
   stack: require('./stack.cjs'),
-  rid: require('./rid.cjs')
+  rid: require('./rid.cjs'),
+  operations: require('./operations.cjs')
 };
 
 const TOPIC_ALIASES = {
@@ -101,7 +103,13 @@ const TOPIC_ALIASES = {
   rid: 'rid',
   uid: 'rid',
   id: 'rid',
-  identifier: 'rid'
+  identifier: 'rid',
+  operations: 'operations',
+  ops: 'operations',
+  tracking: 'operations',
+  events: 'operations',
+  watcher: 'operations',
+  monitor: 'operations'
 };
 
 function printIndex() {
@@ -127,6 +135,7 @@ function printIndex() {
     { id: 'soft-delete', name: '软删除与关联数据残留', desc: '资源软删除后 relations 的行为、API 差异、可视化影响、设计理由' },
     { id: 'stack',       name: '资源栈机制',       desc: '同名资源冲突自动冗余、layer 逻辑分层、stack 命令操作' },
     { id: 'rid',         name: 'RID 一等公民',       desc: 'RID 唯一标识、三级查找机制、name 与 RID 的关系' },
+    { id: 'operations',  name: '操作追踪体系',       desc: 'OP_TYPES 详解、status/diff/sync 对比、FileWatcher、数据流' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
 
