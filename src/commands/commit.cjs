@@ -63,8 +63,25 @@ async function commit(argv) {
     return;
   }
 
+  // 检测是否为合并提交（是否有 pull 产生的冲突入栈资源）
+  const stackedConflicts = await repo.db.all(
+    `SELECT r.* FROM resources r
+     WHERE r.deleted = 0 AND r.layer > 0
+     AND r.metadata LIKE '%"conflict_source":"remote"%'`
+  );
+  const isMerge = stackedConflicts.length > 0 || argv.merge;
+
+  if (stackedConflicts.length > 0) {
+    console.log(chalk.cyan.bold('\n合并提交'));
+    console.log(chalk.gray(`  合并了 ${stackedConflicts.length} 个远程冲突版本`));
+    stackedConflicts.forEach(r => {
+      const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {});
+      console.log(chalk.gray(`    ${r.name} (rid: ${meta.original_rid || r.rid}, layer: ${r.layer})`));
+    });
+  }
+
   const result = await staging.commit(repo);
-  await repo.commit(message, result);
+  await repo.commit(message, result, isMerge);
 
   console.log(chalk.bold(`\n[提交] ${message}`));
   if (result.added > 0) console.log(chalk.green(`新增: ${result.added}`));

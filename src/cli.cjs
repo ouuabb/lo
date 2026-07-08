@@ -345,7 +345,7 @@ cli
       })
       .option('full', {
         type: 'boolean',
-        description: '全量推送（忽略增量锚点）',
+        description: '修复用：忽略远程清单，全量重推',
         default: false
       });
   }, sync)
@@ -442,6 +442,10 @@ cli
         type: 'string',
         alias: 'm',
         description: '提交信息'
+      })
+      .option('merge', {
+        type: 'boolean',
+        description: '标记为合并提交（自动检测，也可手动指定）'
       });
   }, commit)
 

@@ -275,7 +275,8 @@ async function status(argv) {
       if (c.deleted) parts.push(`-${c.deleted}`);
       if (c.renamed) parts.push(`→${c.renamed}`);
       if (c.metadata) parts.push(`m${c.metadata}`);
-      console.log(`    ${chalk.yellow(fmtTime(c.timestamp))}  ${c.message}  ${chalk.dim(`(${parts.join(' ')})`)}`);
+      const mergeTag = c.merge ? chalk.cyan(' [merge]') : '';
+      console.log(`    ${chalk.yellow(fmtTime(c.timestamp))}  ${c.message}${mergeTag}  ${chalk.dim(`(${parts.join(' ')})`)}`);
     }
   } else {
     console.log(chalk.gray('  暂无提交记录'));

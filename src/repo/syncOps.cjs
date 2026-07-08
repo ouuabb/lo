@@ -1,6 +1,8 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs-extra');
+const RidUtils = require('../utils/rid.cjs');
+const Logger = require('../utils/logger.cjs');
 const { assertMetadata } = require('../utils/validateMetadata.cjs');
 
 /**
@@ -74,6 +76,16 @@ class SyncOpsEngine {
     );
 
     return opId;
+  }
+
+  /**
+   * 获取所有设备的所有操作日志（用于与远程清单对比计算差集）
+   * @returns {Promise<Array>}
+   */
+  async getAllOps() {
+    return this.db.all(
+      `SELECT * FROM sync_ops ORDER BY timestamp ASC`
+    );
   }
 
   /**
@@ -203,32 +215,72 @@ class SyncOpsEngine {
             // 内容相同，无需处理
             break;
           }
-          // 保留远程版本，本地版本备份
-          const conflictPath = data.path.replace(/(\.loec)?$/, '.conflict$&');
-          const localMeta = typeof local.metadata === 'string'
-            ? JSON.parse(local.metadata)
-            : (local.metadata || {});
-          const conflictMeta = assertMetadata(
-            { ...localMeta, conflict: true, original_rid: rid },
-            'syncOps.applyOp:conflict_backup'
+
+          // 本地保持不变，远程版本自动入栈
+          const resourceName = local.name || data.name || '';
+          const remotePath = data.new_path || data.path;
+
+          // 找下一个可用栈层（从 layer=1 开始）
+          const stack = await this.db.all(
+            'SELECT layer FROM resources WHERE name = ? AND deleted = 0 ORDER BY layer ASC',
+            [resourceName]
+          );
+          const usedLayers = new Set(stack.map(r => r.layer));
+          let targetLayer = 1;
+          while (usedLayers.has(targetLayer) && targetLayer < 20) {
+            targetLayer++;
+          }
+
+          if (targetLayer >= 20) {
+            // 栈满，回退到 .conflict 文件方式
+            const conflictPath = remotePath.replace(/(\.loec)?$/, '.conflict$&');
+            const localMeta = typeof local.metadata === 'string'
+              ? JSON.parse(local.metadata)
+              : (local.metadata || {});
+            const conflictMeta = assertMetadata(
+              { ...localMeta, conflict: true, original_rid: rid },
+              'syncOps.applyOp:conflict_backup'
+            );
+            await this.db.run(
+              `INSERT OR REPLACE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated, deleted)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+              [rid + '_conflict_' + Date.now(), resourceName, 0, local.type, conflictPath, local.hash,
+               JSON.stringify(conflictMeta),
+               local.encrypted ? 1 : 0, local.created, local.updated]
+            );
+            return {
+              rid, path: data.path, type: 'edit_edit',
+              remote_version: data.new_hash, local_version: local.hash,
+              resolved: 'remote_wins_with_backup', conflictPath
+            };
+          }
+
+          // 远程版本入栈
+          const stackRid = RidUtils.generate();
+          const remoteMeta = data.metadata
+            ? (typeof data.metadata === 'string' ? JSON.parse(data.metadata) : data.metadata)
+            : {};
+          const stackedMeta = assertMetadata(
+            { ...remoteMeta, stacked: true, conflict_source: 'remote', original_rid: rid },
+            'syncOps.applyOp:stack_conflict'
           );
 
           await this.db.run(
-            `INSERT OR REPLACE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated, deleted)
+            `INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated, deleted)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-            [rid + '_conflict_' + Date.now(), local.name || '', 0, local.type, conflictPath, local.hash,
-             JSON.stringify(conflictMeta),
-             local.encrypted ? 1 : 0, local.created, local.updated]
+            [stackRid, resourceName, targetLayer, local.type || data.type || 'note',
+             remotePath, data.new_hash || data.hash,
+             JSON.stringify(stackedMeta),
+             local.encrypted ? 1 : 0, opTimestamp, opTimestamp]
           );
 
+          Logger.warn(`冲突已入栈: "${resourceName}" → layer ${targetLayer} (本地版本保留为活跃层)`);
+
           return {
-            rid,
-            path: data.path,
-            type: 'edit_edit',
-            remote_version: data.new_hash,
-            local_version: local.hash,
-            resolved: 'remote_wins_with_backup',
-            conflictPath
+            rid, path: data.path, type: 'edit_edit',
+            remote_version: data.new_hash, local_version: local.hash,
+            resolved: 'local_preserved_remote_stacked',
+            stackLayer: targetLayer, stackRid
           };
         }
 

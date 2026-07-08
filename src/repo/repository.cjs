@@ -811,10 +811,10 @@ class Repository {
     return result;
   }
 
-  async commit(message, stagingResult) {
+  async commit(message, stagingResult, isMerge = false) {
     await this.db.run(
-      'INSERT INTO commits (message, timestamp, added, updated, deleted, renamed, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [message, Date.now(), stagingResult.added, stagingResult.updated || 0, stagingResult.deleted, stagingResult.renamed, stagingResult.metadata || 0]
+      'INSERT INTO commits (message, timestamp, added, updated, deleted, renamed, metadata, merge) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [message, Date.now(), stagingResult.added, stagingResult.updated || 0, stagingResult.deleted, stagingResult.renamed, stagingResult.metadata || 0, isMerge ? 1 : 0]
     );
   }
 

@@ -16,6 +16,69 @@ const Logger = require('./logger.cjs');
 
 class SyncRemote {
   /**
+   * 获取远程同步清单（记录远程已接收的全部 op_id）
+   * 清单不存在时返回 null，表示需要全量推送
+   *
+   * @param {object} parsed - 已解析的远程地址
+   * @returns {Promise<Set<string>|null>} 远程已接收的 op_id 集合，null 表示无清单
+   */
+  async fetchRemoteManifest(parsed) {
+    const manifestPath = `${parsed.remotePath}/sync_batches/sync_manifest.json`;
+
+    if (parsed.isLocal) {
+      try {
+        const content = await fs.readFile(manifestPath, 'utf-8');
+        const manifest = JSON.parse(content);
+        return new Set(manifest.op_ids || []);
+      } catch {
+        return null;
+      }
+    }
+
+    // 远程同步：SSH cat 清单文件
+    const sshTarget = `${parsed.user ? parsed.user + '@' : ''}${parsed.host}`;
+    try {
+      const stdout = execFileSync('ssh', [
+        sshTarget, 'cat', manifestPath
+      ], { stdio: 'pipe', timeout: 10000 }).toString().trim();
+
+      if (!stdout) return null;
+      const manifest = JSON.parse(stdout);
+      return new Set(manifest.op_ids || []);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 推送同步清单到远程
+   *
+   * @param {Set<string>} opIds - 远程应记录的 op_id 全集
+   * @param {object} parsed - 已解析的远程地址
+   */
+  async pushRemoteManifest(opIds, parsed) {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lo-manifest-'));
+    const localPath = path.join(tempDir, 'sync_manifest.json');
+    const manifest = { version: 1, op_ids: [...opIds] };
+    await fs.writeFile(localPath, JSON.stringify(manifest));
+
+    const remotePath = `${parsed.remotePath}/sync_batches/sync_manifest.json`;
+
+    try {
+      if (parsed.isLocal) {
+        await fs.copyFile(localPath, remotePath);
+      } else {
+        const sshTarget = `${parsed.user ? parsed.user + '@' : ''}${parsed.host}`;
+        execFileSync('scp', ['-q', localPath, `${sshTarget}:${remotePath}`], {
+          stdio: 'pipe', timeout: 30000
+        });
+      }
+    } finally {
+      await this.cleanup(tempDir);
+    }
+  }
+
+  /**
    * @param {string} repoPath - 仓库根路径
    */
   constructor(repoPath) {
@@ -29,28 +92,35 @@ class SyncRemote {
    * @returns {{ user: string|null, host: string|null, remotePath: string, isLocal: boolean }}
    */
   parseRemote(remote) {
-    // Windows 本地路径 (C:\... 或 \\...)
+    // Windows 绝对路径 (C:\... 或 \\...)
     if (path.isAbsolute(remote) || /^[a-zA-Z]:\\/.test(remote)) {
       return { user: null, host: null, remotePath: remote, isLocal: true };
     }
 
-    // Unix 本地路径 (/path/to/repo)
-    if (!remote.includes('@') && !remote.includes(':')) {
+    // Unix 绝对路径 (/path/to/repo)
+    if (/^[~/]/.test(remote)) {
       return { user: null, host: null, remotePath: remote, isLocal: true };
     }
 
     // SCP 格式: user@host:/path
     const match = remote.match(/^(?:([^@]+)@)?([^:]+):(.+)$/);
-    if (!match) {
-      throw new Error(`无效的远程地址: ${remote}。格式: user@host:/path`);
+    if (match) {
+      return {
+        user: match[1] || null,
+        host: match[2],
+        remotePath: match[3],
+        isLocal: false
+      };
     }
 
-    return {
-      user: match[1] || null,
-      host: match[2],
-      remotePath: match[3],
-      isLocal: false
-    };
+    throw new Error(
+      `无效的远程地址: ${remote}。\n` +
+      '  支持格式:\n' +
+      '    user@host:/path    SSH 远程\n' +
+      '    /absolute/path     绝对本地路径（Unix）\n' +
+      '    C:\\path            绝对本地路径（Windows）\n' +
+      '    别名                通过 lo remote add 配置的别名'
+    );
   }
 
   /**

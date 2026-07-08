@@ -131,7 +131,8 @@ class Database {
         updated INTEGER DEFAULT 0,
         deleted INTEGER DEFAULT 0,
         renamed INTEGER DEFAULT 0,
-        metadata INTEGER DEFAULT 0
+        metadata INTEGER DEFAULT 0,
+        merge INTEGER DEFAULT 0
       )
     `);
 
@@ -145,6 +146,13 @@ class Database {
     // 数据迁移：为已有仓库的 commits 表添加 metadata 列
     try {
       await this.run('ALTER TABLE commits ADD COLUMN metadata INTEGER DEFAULT 0');
+    } catch {
+      // 列已存在，忽略
+    }
+
+    // 数据迁移：为已有仓库的 commits 表添加 merge 列（标识合并提交）
+    try {
+      await this.run('ALTER TABLE commits ADD COLUMN merge INTEGER DEFAULT 0');
     } catch {
       // 列已存在，忽略
     }

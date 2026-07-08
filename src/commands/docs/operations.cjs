@@ -154,8 +154,16 @@ module.exports = function() {
       ├─→ lo diff    ──→  只读检测：同上 + 内容差异详情
       │
       └─→ lo sync    ──→  全量检测 + 写入 sync_ops
-           lo push   ──→  打包 sync_ops + 文件 → 远程
-           lo pull   ──→  拉取 → applyOps 重放 → 本地 DB
+           lo push   ──→  对比远程清单 → 差集打包 → 远程（远程有新操作则拦截）
+           lo pull   ──→  对比远程清单 → 下载批次 → applyOps
+                            │  冲突: 远程版本自动入栈（layer≥1），本地不变
+                            │  无冲突: 直接应用
+                            │
+                      冲突后合并流程:
+                        lo stack list  →  查看冲突版本
+                        手动合并内容
+                        lo add → lo commit  →  自动生成 [merge] 合并提交
+                        lo push  →  推送合并提交
 
   核心原则: 无论变更来源是什么（命令行、拖文件、外部编辑器、
   chokidar 事件），系统都能检测并响应。但只有经过 lo commit
@@ -170,9 +178,13 @@ module.exports = function() {
   - FileWatcher 自动响应但不写 sync_ops（适合本地实时感知）
   - 跨设备同步依赖 sync_ops 表，建议定期 lo sync 或 lo commit
   - RESOURCE_TAGGED 类型已预留，待未来版本激活
-  - push/pull/clone 通过 sync_ops 的增量锚点实现高效同步
+  - push/pull/clone 基于远程同步清单（sync_manifest.json）做差集同步
+  - push 发现远程有本地未知操作时会拒绝推送，强制先 pull → 合并 → commit → push
+  - pull 冲突不再产生 .conflict 文件，远程版本自动入栈，本地保持不变
+  - 合并提交自动检测 conflict_source: "remote" 入栈资源，commits 表 merge=1
+  - lo status 中合并提交显示 [merge] 标签，便于区分
 
-  相关命令: lo status, lo diff, lo sync, lo commit
-  相关文档: lo docs sync, lo docs database`);
+  相关命令: lo status, lo diff, lo sync, lo commit, lo push, lo pull
+  相关文档: lo docs sync, lo docs database, lo docs stack, lo docs rid`);
   console.log('');
 };

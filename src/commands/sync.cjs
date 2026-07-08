@@ -109,40 +109,63 @@ async function push(argv) {
     Logger.info('正在扫描本地变更...');
     await repo.sync({ full: !!full });
 
-    // 2. 获取未同步的操作
-    const anchor = full ? null : await repo.syncOps.getAnchor(resolvedRemote);
-    const unsyncedOps = await repo.syncOps.getUnsyncedOps(anchor);
+    // 2. 获取远程已接收的操作清单
+    Logger.info('正在比对远程状态...');
+    const remoteManifest = full ? null : await remoteTransport.fetchRemoteManifest(parsed);
 
-    if (unsyncedOps.length === 0) {
-      Logger.success('没有需要推送的变更');
+    // 3. 获取本地全部操作日志
+    const allOps = await repo.syncOps.getAllOps();
+
+    // 4. 计算差集：本地有、远程没有的
+    const newOps = remoteManifest
+      ? allOps.filter(op => !remoteManifest.has(op.op_id))
+      : allOps;
+
+    if (newOps.length === 0) {
+      Logger.success('已是最新，无需推送');
       process.exit(0);
-      return;  // finally 块会关闭 repo
+      return;
     }
 
-    Logger.info(`发现 ${unsyncedOps.length} 条未同步操作`);
+    Logger.info(`远程已有 ${remoteManifest ? remoteManifest.size : 0} 条操作`);
+    Logger.info(`需要推送 ${newOps.length} 条新操作`);
 
-    // 3. 打包操作 + 资源文件
+    // 检测远程是否有本地缺少的操作（其他设备推送的）
+    if (remoteManifest) {
+      const localOpIds = new Set(allOps.map(op => op.op_id));
+      const remoteOnlyCount = [...remoteManifest].filter(id => !localOpIds.has(id)).length;
+      if (remoteOnlyCount > 0) {
+        Logger.error(`远程有 ${remoteOnlyCount} 条本地未同步的操作，禁止推送`);
+        Logger.info(`请先拉取并处理冲突:\n  ${chalk.cyan(`lo pull ${remote}`)}`);
+        Logger.info('处理流程: pull → 冲突自动入栈 → 手动合并 → add → commit → push');
+        process.exit(1);
+        return;
+      }
+    }
+
+    // 5. 打包操作 + 资源文件
     Logger.info('正在打包同步批次...');
-    tempBatch = await remoteTransport.packageBatch(unsyncedOps, {
+    tempBatch = await remoteTransport.packageBatch(newOps, {
       device_id: await repo.syncOps.getDeviceId(),
       timestamp: Date.now()
     });
 
-    // 4. 推送到远程
+    // 6. 推送到远程
     Logger.info(`正在推送到 ${parsed.host || parsed.remotePath}...`);
     const destPath = await remoteTransport.pushBatch(tempBatch, resolvedRemote, parsed);
 
-    // 5. 更新同步锚点
-    const lastOp = unsyncedOps[unsyncedOps.length - 1];
-    await repo.syncOps.setAnchor(resolvedRemote, {
-      last_op_id: lastOp.op_id,
-      last_op_timestamp: lastOp.timestamp
-    });
+    // 7. 更新远程清单（远程原有 + 本次新增）
+    const newRemoteManifest = new Set(remoteManifest || []);
+    for (const op of newOps) {
+      newRemoteManifest.add(op.op_id);
+    }
+    await remoteTransport.pushRemoteManifest(newRemoteManifest, parsed);
 
-    Logger.success(`推送成功: ${unsyncedOps.length} 条操作`);
+    Logger.success(`推送成功: ${newOps.length} 条操作`);
     Logger.info(`远程路径: ${destPath}`);
+    Logger.info(`远程清单已更新: ${newRemoteManifest.size} 条操作总记录`);
 
-    // 提示远程用户执行 pull（如果用了别名，显示别名；否则显示地址）
+    // 提示远程用户执行 pull
     Logger.info(chalk.gray('\n在另一台设备上运行以完成同步:'));
     Logger.info(chalk.cyan(`  lo pull ${remote}`));
 
@@ -174,28 +197,74 @@ async function pull(argv) {
   const remoteTransport = new SyncRemote(repo.repoPath);
   const parsed = remoteTransport.parseRemote(resolvedRemote);
 
-  let batchPath = null;
-  let extractDir = null;
+  const tempDirs = [];
   try {
-    // 1. 从远程拉取最新批次
-    Logger.info(`正在从 ${parsed.host || parsed.remotePath} 拉取同步批次...`);
-    batchPath = await remoteTransport.pullLatestBatch(resolvedRemote, parsed);
+    // 1. 获取远程清单，计算本地缺少的 op_id
+    Logger.info('正在比对远程状态...');
+    const remoteManifest = await remoteTransport.fetchRemoteManifest(parsed);
+    const localOps = await repo.syncOps.getAllOps();
+    const localOpIds = new Set(localOps.map(op => op.op_id));
 
-    // 2. 解包并验证
-    Logger.info('正在验证批次完整性...');
-    const { manifest, ops, resourceDir, extractDir: ed } =
-      await remoteTransport.unpackBatch(batchPath);
-    extractDir = ed;
+    const neededOpIds = remoteManifest
+      ? [...remoteManifest].filter(id => !localOpIds.has(id))
+      : [];
 
-    Logger.info(`批次包含 ${ops.length} 条操作`);
+    if (neededOpIds.length === 0 && remoteManifest) {
+      Logger.success('已是最新，无需拉取');
+      process.exit(0);
+      return;
+    }
 
-    // 3. 安装资源文件
-    Logger.info('正在安装资源文件...');
-    await remoteTransport.installResources(resourceDir, repo.repoPath);
+    // 2. 从远程拉取所有批次文件
+    Logger.info(`正在从 ${parsed.host || parsed.remotePath} 拉取批次文件...`);
+    const allBatches = await remoteTransport.pullAllBatches(resolvedRemote, parsed);
 
-    // 4. 应用操作日志
+    if (allBatches.length === 0) {
+      Logger.error('远程仓库中没有同步批次');
+      process.exit(1);
+    }
+
+    Logger.info(`发现 ${allBatches.length} 个同步批次`);
+
+    // 3. 解包各批次，收集本地缺少的操作和资源
+    let allNewOps = [];
+    let totalOps = 0;
+
+    for (const batchFile of allBatches) {
+      tempDirs.push(batchFile);
+      const { manifest, ops, resourceDir, extractDir } =
+        await remoteTransport.unpackBatch(batchFile);
+
+      // 过滤出本地没有的操作
+      const newOps = ops.filter(op => !localOpIds.has(op.op_id));
+      allNewOps = allNewOps.concat(newOps);
+      totalOps += ops.length;
+
+      // 只安装新操作涉及的资源文件
+      if (newOps.length > 0) {
+        await remoteTransport.installResources(resourceDir, repo.repoPath);
+      }
+
+      // 清理非最终的临时目录
+      if (extractDir !== batchFile) {
+        tempDirs.push(extractDir);
+      }
+    }
+
+    // 按时间排序
+    allNewOps.sort((a, b) => a.timestamp - b.timestamp);
+
+    if (allNewOps.length === 0) {
+      Logger.success('已是最新');
+      process.exit(0);
+      return;
+    }
+
+    Logger.info(`远程共 ${totalOps} 条操作，本地缺少 ${allNewOps.length} 条`);
+
+    // 4. 应用新操作
     Logger.info('正在应用操作...');
-    const results = await repo.syncOps.applyOps(ops, repo);
+    const results = await repo.syncOps.applyOps(allNewOps, repo);
 
     // 5. 报告结果
     Logger.title('拉取报告');
@@ -219,14 +288,6 @@ async function pull(argv) {
       });
     }
 
-    // 6. 更新本地同步锚点
-    if (manifest.last_op_timestamp) {
-      await repo.syncOps.setAnchor(resolvedRemote, {
-        last_op_id: manifest.last_op_id,
-        last_op_timestamp: manifest.last_op_timestamp
-      });
-    }
-
     Logger.success('拉取完成');
 
     process.exit(0);
@@ -236,8 +297,9 @@ async function pull(argv) {
     process.exit(1);
   } finally {
     if (repo.db) await repo.close();
-    if (batchPath) await remoteTransport.cleanup(batchPath);
-    if (extractDir && extractDir !== batchPath) await remoteTransport.cleanup(extractDir);
+    for (const d of tempDirs) {
+      await remoteTransport.cleanup(d);
+    }
   }
 }
 
