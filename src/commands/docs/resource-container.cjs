@@ -15,7 +15,7 @@ module.exports = function() {
     - Member: 容器中的文件条目（File Member）或已提升的 Resource（Resource Member）
 
   核心理念：任何文件都可以是容器的普通成员（File Member），
-  当需要对某个成员进行标记、引用、分类时，通过 promote 提升为独立 Resource。`);
+  当需要对某个成员进行标记、引用、分类时，通过 lo container promote 提升为独立 Resource。`);
 
   // Resource
   console.log(chalk.bold.yellow('\n  Resource'));
@@ -80,7 +80,7 @@ module.exports = function() {
     1. 管理成员（container_members 表）
     2. 按 container_schema 过滤成员类型
     3. 扫描 Content Source 目录自动同步成员列表
-    4. 支持 promote 操作
+    4. 支持 promote / demote 操作
 
   创建容器时:
     lo create resource project ./demo
@@ -131,11 +131,12 @@ module.exports = function() {
     - 可以添加标签、分类
     - 仍然是容器的成员（保持 container_rid 关联）`);
 
-  // Promote 机制
-  console.log(chalk.bold.yellow('\n  Promote 机制'));
+  // Promote / Demote 机制
+  console.log(chalk.bold.yellow('\n  Promote / Demote 机制'));
   console.log(chalk.gray('  ' + '─'.repeat(55)));
   console.log(`
-  lo promote 将 File Member 提升为 Resource Member。
+  lo container promote 将 File Member 提升为 Resource Member。
+  lo container promote --revert 将 Resource Member 降级为 File Member。
 
   为什么要 Promote？
 
@@ -150,7 +151,7 @@ module.exports = function() {
 
   Promote 流程:
 
-    lo promote 项目/src/auth.py
+    lo container promote 项目/src/auth.py
 
     1. 查找 container_rid（自动或手动指定）
     2. 从 Content Source 找到文件的绝对路径
@@ -168,7 +169,21 @@ module.exports = function() {
     - 原文件不受影响
     - 新 Resource 拥有独立 RID
     - 可以与任何 Resource 建立 Relation
-    - 仍然是容器的成员`);
+    - 仍然是容器的成员
+
+  Demote（降级）:
+
+    lo container promote 项目/src/auth.py --revert
+
+    1. 查找 container_members 中的成员记录
+    2. 将 resource_rid 设置为 NULL
+    3. 成员恢复为普通 File Member
+    4. Resource 本身不被删除（仍独立存在）
+
+  降级后:
+    - 成员不再关联独立 Resource
+    - Resource 本身不受影响
+    - 可通过 lo container promote 重新提升`);
 
   // 与其他系统的关系
   console.log(chalk.bold.yellow('\n  与 Relation 系统的关系'));
@@ -218,9 +233,9 @@ module.exports = function() {
       支持: project, album, dataset, course, collection
       选项: --name, --no-scan
 
-  lo promote <path>
-      将 File Member 提升为 Resource Member
-      选项: --container <rid>, --type <type>
+  lo container promote <path>
+      将 File Member 提升为 Resource Member（--revert 降级）
+      选项: --container <rid>, --type <type>, --revert
 
   lo link <rid1> <rid2>
       promote 后的 Resource 可以参与 Relation
@@ -247,7 +262,7 @@ module.exports = function() {
   - 删除容器 Resource 时，container_members 自动级联删除
   - 已 promote 的 Resource 成员不受级联删除影响（resource_rid 保留）
 
-  相关命令: lo create resource, lo promote, lo manual resource
+  相关命令: lo create resource, lo container promote, lo manual resource
   相关文档: lo docs rid, lo docs wikilink`);
   console.log('');
 };
