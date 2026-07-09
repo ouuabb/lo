@@ -237,6 +237,16 @@ module.exports = function() {
       将 File Member 提升为 Resource Member（--revert 降级）
       选项: --container <rid>, --type <type>, --revert
 
+  lo container status <rid>
+      查看容器成员的状态变更（只读，对比文件系统与数据库）
+      显示新增 (A)、修改 (M)、删除 (D) 的文件
+
+  lo container scan <rid>
+      同步容器成员（scan=status+apply，将文件变化应用到数据库）
+
+  lo container list <rid>
+      列出容器所有成员（--resources / --files 过滤）
+
   lo link <rid1> <rid2>
       promote 后的 Resource 可以参与 Relation
 
@@ -247,9 +257,45 @@ module.exports = function() {
   相关 API:
     repo.createResourceWithContainer(type, path, options)
     repo.promoteMember(containerRid, memberPath, options)
+    repo.demoteMember(containerRid, memberPath)
     repo.getContainerMembers(containerRid)
-    repo.scanContainerMembers(containerRid)
+    repo.getContainerDiff(containerRid)
+    repo.syncContainerMembers(containerRid)
     repo.getContainerMemberStats(containerRid)`);
+
+  // Container 同步体系
+  console.log(chalk.bold.yellow('\n  Container 同步体系'));
+  console.log(chalk.gray('  ' + '─'.repeat(55)));
+  console.log(`
+  Container 拥有独立的成员同步机制，不参与 lo status/add/commit 流程:
+
+  ┌─────────────────────────────────────────────────────┐
+  │  lo 层级            │  管理内容           │  命令          │
+  ├─────────────────────────────────────────────────────┤
+  │  资源层 (Resource)   │  RID、Relation、标签 │  lo status     │
+  │                      │  分类、元数据        │  lo add/commit │
+  ├─────────────────────────────────────────────────────┤
+  │  容器层 (Container)  │  文件新增/修改/删除  │  lo container  │
+  │                      │  Member 索引         │  status/scan   │
+  └─────────────────────────────────────────────────────┘
+
+  工作流:
+
+    1. lo container status <rid>    查看变更（只读）
+    2. lo container scan <rid>      应用变更（同步到数据库）
+    3. lo container promote <path>  将重要文件提升为 Resource
+
+  对比机制:
+
+    文件系统的文件 ──┬── 新增 (filesystem 有, DB 无)  → A
+                     ├── 修改 (hash 不同)             → M
+                     ├── 删除 (DB 有, filesystem 无)  → D
+                     └── 未变 (hash 相同)             → unchanged
+
+  promote 是分水岭:
+    File Member  → lo container promote → Resource (进入资源层管线)
+    此时文件变更仍然属于容器层的 content sync，但 Resource 本身
+    的标签、Relation 变更属于资源层的 lo status/add/commit。`);
 
   // 注意事项
   console.log(chalk.bold.yellow('\n  注意事项'));
@@ -261,6 +307,7 @@ module.exports = function() {
   - 容器成员按 (container_rid, path) 唯一，同一文件不会重复添加
   - 删除容器 Resource 时，container_members 自动级联删除
   - 已 promote 的 Resource 成员不受级联删除影响（resource_rid 保留）
+  - lo container scan 仅同步 member 索引（hash/name/size），不修改 resource_rid
 
   相关命令: lo create resource, lo container promote, lo manual resource
   相关文档: lo docs rid, lo docs wikilink`);

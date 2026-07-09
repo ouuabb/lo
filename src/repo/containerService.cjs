@@ -397,6 +397,181 @@ class ContainerService {
     };
   }
 
+  /**
+   * 对比文件系统与数据库，返回成员差异
+   * 不修改数据库，纯只读操作。
+   *
+   * @param {string} containerRid
+   * @param {string} sourceDir - Content Source 目录绝对路径
+   * @returns {Promise<{ added: Array, modified: Array, deleted: Array, unchanged: number }>}
+   */
+  async diffMembers(containerRid, sourceDir) {
+    if (!await fs.pathExists(sourceDir)) {
+      throw new Error(`源目录不存在: ${sourceDir}`);
+    }
+
+    // 1. 扫描文件系统
+    const fsFiles = [];
+    await this._scanFilesForDiff(sourceDir, true, fsFiles);
+
+    // 构建 相对路径 → 文件系统文件 的映射
+    const fsMap = new Map();
+    for (const f of fsFiles) {
+      const relPath = path.relative(sourceDir, f.absPath).replace(/\\/g, '/');
+      fsMap.set(relPath, f);
+    }
+
+    // 2. 获取数据库中的成员
+    const dbMembers = await this.getMembers(containerRid);
+    const dbMap = new Map();
+    for (const m of dbMembers) {
+      dbMap.set(m.path, m);
+    }
+
+    // 3. 计算差异
+    const added = [];
+    const modified = [];
+    const deleted = [];
+    let unchanged = 0;
+
+    // 文件系统中的文件：新增 or 修改 or 未变
+    for (const [relPath, fsFile] of fsMap) {
+      const dbMember = dbMap.get(relPath);
+
+      if (!dbMember) {
+        // 文件系统中存在，数据库中没有 → 新增
+        added.push({
+          path: relPath,
+          name: fsFile.name,
+          size: fsFile.size,
+          hash: fsFile.hash,
+          modified_time: fsFile.mtime,
+          source: sourceDir
+        });
+      } else {
+        // 都存在，检查是否有变化
+        const memberHash = dbMember.hash || '';
+        if (memberHash !== fsFile.hash) {
+          modified.push({
+            path: relPath,
+            name: fsFile.name,
+            size: fsFile.size,
+            hash: fsFile.hash,
+            modified_time: fsFile.mtime,
+            old_hash: memberHash,
+            old_modified_time: dbMember.modified_time,
+            resource_rid: dbMember.resource_rid,
+            source: sourceDir
+          });
+        } else {
+          unchanged++;
+        }
+      }
+    }
+
+    // 数据库中存在但文件系统中不存在的 → 已删除
+    for (const [relPath, dbMember] of dbMap) {
+      if (!fsMap.has(relPath)) {
+        deleted.push({
+          path: relPath,
+          name: dbMember.name,
+          old_hash: dbMember.hash || '',
+          resource_rid: dbMember.resource_rid,
+          id: dbMember.id
+        });
+      }
+    }
+
+    return { added, modified, deleted, unchanged };
+  }
+
+  /**
+   * 同步：将 diffMembers 的差异应用到数据库
+   *
+   * @param {string} containerRid
+   * @param {string} sourceDir
+   * @returns {Promise<{ added: number, updated: number, removed: number, errors: Array }>}
+   */
+  async syncMembers(containerRid, sourceDir) {
+    const diff = await this.diffMembers(containerRid, sourceDir);
+    const result = { added: 0, updated: 0, removed: 0, errors: [] };
+
+    // 新增
+    for (const item of diff.added) {
+      try {
+        await this.addMember(containerRid, {
+          path: item.path,
+          name: item.name,
+          size: item.size,
+          hash: item.hash,
+          modified_time: item.modified_time
+        });
+        result.added++;
+      } catch (e) {
+        result.errors.push({ file: item.path, error: e.message });
+      }
+    }
+
+    // 修改
+    for (const item of diff.modified) {
+      try {
+        await this.addMember(containerRid, {
+          path: item.path,
+          name: item.name,
+          size: item.size,
+          hash: item.hash,
+          modified_time: item.modified_time
+        });
+        result.updated++;
+      } catch (e) {
+        result.errors.push({ file: item.path, error: e.message });
+      }
+    }
+
+    // 删除
+    for (const item of diff.deleted) {
+      try {
+        await this.removeMember(containerRid, item.path);
+        result.removed++;
+      } catch (e) {
+        result.errors.push({ file: item.path, error: e.message });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 扫描目录文件（供 diff 使用，返回带 hash 的文件列表）
+   */
+  async _scanFilesForDiff(baseDir, recursive, result) {
+    try {
+      const entries = await fs.readdir(baseDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const absPath = path.join(baseDir, entry.name);
+        if (entry.isDirectory()) {
+          if (recursive && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+            await this._scanFilesForDiff(absPath, recursive, result);
+          }
+        } else if (entry.isFile()) {
+          if (ResourceType.isSupported(absPath)) {
+            const stats = await fs.stat(absPath);
+            const fileHash = await HashUtils.fromFile(absPath, this._cryptoKey);
+            result.push({
+              absPath,
+              name: entry.name,
+              size: stats.size,
+              hash: fileHash,
+              mtime: stats.mtime.getTime()
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // 目录读取失败，静默跳过
+    }
+  }
+
   _hydrateMember(row) {
     return {
       ...row,

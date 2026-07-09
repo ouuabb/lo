@@ -464,7 +464,7 @@ cli
       .demandCommand(1, '请指定 create 的子命令');
   })
 
-  .command('container', '容器管理（提升/降级成员、扫描、列表等）', (yargs) => {
+  .command('container', '容器管理（提升/降级、状态、扫描、列表）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {
         yargs
@@ -489,7 +489,42 @@ cli
             default: false
           });
       }, containerCmd.promote)
-      .demandCommand(1, '请指定容器子命令。当前可用: promote');
+
+      .command('status <rid>', '查看容器成员变更状态（对比文件系统与数据库）', (yargs) => {
+        yargs
+          .positional('rid', {
+            type: 'string',
+            description: '容器 Resource 的 RID'
+          });
+      }, containerCmd.status)
+
+      .command('scan <rid>', '同步容器成员（将文件系统变化应用到数据库）', (yargs) => {
+        yargs
+          .positional('rid', {
+            type: 'string',
+            description: '容器 Resource 的 RID'
+          });
+      }, containerCmd.scan)
+
+      .command('list <rid>', '列出容器所有成员', (yargs) => {
+        yargs
+          .positional('rid', {
+            type: 'string',
+            description: '容器 Resource 的 RID'
+          })
+          .option('resources', {
+            type: 'boolean',
+            description: '仅显示已提升为 Resource 的成员',
+            default: false
+          })
+          .option('files', {
+            type: 'boolean',
+            description: '仅显示未提升的普通文件成员',
+            default: false
+          });
+      }, containerCmd.list)
+
+      .demandCommand(1, '请指定容器子命令。可用: promote, status, scan, list');
   })
 
   .command('commit', '提交暂存区到仓库', (yargs) => {

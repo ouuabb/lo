@@ -566,6 +566,52 @@ class Repository {
     return this.containerService.getMemberStats(containerRid);
   }
 
+  /**
+   * 获取容器成员的内容变更差异（只读，不修改数据库）
+   *
+   * 遍历容器的所有 Content Source，对比文件系统与 container_members 表，
+   * 返回每个 source 的新增/修改/删除文件列表。
+   *
+   * @param {string} containerRid
+   * @returns {Promise<Array<{ source: string, added: Array, modified: Array, deleted: Array, unchanged: number }>>}
+   */
+  async getContainerDiff(containerRid) {
+    if (!await this.containerService.hasContainerCapability(containerRid)) {
+      throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
+    }
+    const sources = await this.sourceService.getLocalFolderSources(containerRid);
+    const results = [];
+    for (const src of sources) {
+      const diff = await this.containerService.diffMembers(containerRid, src.location);
+      results.push({ source: src.location, ...diff });
+    }
+    return results;
+  }
+
+  /**
+   * 同步容器成员：将文件系统的变化应用到数据库
+   *
+   * 对比文件系统与 container_members 表，然后:
+   *   - 新增数据库中没有的文件
+   *   - 更新 hash 变化的文件
+   *   - 移除文件系统中已不存在的成员
+   *
+   * @param {string} containerRid
+   * @returns {Promise<Array<{ source: string, added: number, updated: number, removed: number, errors: Array }>>}
+   */
+  async syncContainerMembers(containerRid) {
+    if (!await this.containerService.hasContainerCapability(containerRid)) {
+      throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
+    }
+    const sources = await this.sourceService.getLocalFolderSources(containerRid);
+    const results = [];
+    for (const src of sources) {
+      const syncResult = await this.containerService.syncMembers(containerRid, src.location);
+      results.push({ source: src.location, ...syncResult });
+    }
+    return results;
+  }
+
   async getResource(rid) {
     return this.resourceService.getByRid(rid);
   }
