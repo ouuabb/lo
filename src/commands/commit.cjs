@@ -83,6 +83,16 @@ async function commit(argv) {
   const result = await staging.commit(repo);
   await repo.commit(message, result, isMerge);
 
+  // 合并提交后清除已解决的入栈冲突资源
+  if (isMerge) {
+    for (const r of stackedConflicts) {
+      await repo.db.run(
+        'DELETE FROM resources WHERE rid = ?',
+        [r.rid]
+      );
+    }
+  }
+
   console.log(chalk.bold(`\n[提交] ${message}`));
   if (result.added > 0) console.log(chalk.green(`新增: ${result.added}`));
   if (result.updated > 0) console.log(chalk.blue(`更新: ${result.updated}`));
