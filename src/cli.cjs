@@ -38,7 +38,7 @@ const diff = require('./commands/diff.cjs');
 const stack = require('./commands/stack.cjs');
 const rm = require('./commands/rm.cjs');
 const resource = require('./commands/resource.cjs');
-const promote = require('./commands/promote.cjs');
+const containerCmd = require('./commands/container.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -464,23 +464,33 @@ cli
       .demandCommand(1, '请指定 create 的子命令');
   })
 
-  .command('promote [path]', '将容器成员提升为独立 Resource', (yargs) => {
+  .command('container', '容器管理（提升/降级成员、扫描、列表等）', (yargs) => {
     yargs
-      .positional('path', {
-        type: 'string',
-        description: '要提升的文件路径'
-      })
-      .option('container', {
-        type: 'string',
-        alias: 'c',
-        description: '容器 RID（不指定则自动查找）'
-      })
-      .option('type', {
-        type: 'string',
-        alias: 't',
-        description: 'Resource 类型（默认根据文件扩展名推导）'
-      });
-  }, promote)
+      .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {
+        yargs
+          .positional('path', {
+            type: 'string',
+            description: '要操作的文件路径'
+          })
+          .option('container', {
+            type: 'string',
+            alias: 'c',
+            description: '容器 RID（不指定则自动查找）'
+          })
+          .option('type', {
+            type: 'string',
+            alias: 't',
+            description: 'Resource 类型（仅提升时生效，默认根据文件扩展名推导）'
+          })
+          .option('revert', {
+            type: 'boolean',
+            alias: 'r',
+            description: '降级：将已提升成员恢复为普通文件成员',
+            default: false
+          });
+      }, containerCmd.promote)
+      .demandCommand(1, '请指定容器子命令。当前可用: promote');
+  })
 
   .command('commit', '提交暂存区到仓库', (yargs) => {
     yargs

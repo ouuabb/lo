@@ -333,6 +333,49 @@ class ContainerService {
   }
 
   /**
+   * Demote: 将已提升的 Resource Member 降级为普通 File Member
+   *
+   * 流程:
+   *   1. 找到容器中的成员记录
+   *   2. 将 resource_rid 设置为 NULL
+   *   3. 成员恢复为普通文件成员（不再关联独立 Resource）
+   *
+   * 注意: 降级不会删除 Resource 本身，Resource 仍然独立存在。
+   * 如需删除 Resource，请使用 lo delete <rid>。
+   *
+   * @param {string} containerRid - 容器 RID
+   * @param {string} memberPath - 成员在容器中的路径
+   * @returns {Promise<object>} { demoted: true, resource_rid: string }
+   */
+  async demoteMember(containerRid, memberPath) {
+    const member = await this.getMember(containerRid, memberPath);
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}`);
+    }
+
+    if (!member.resource_rid) {
+      throw new Error(`成员 "${memberPath}" 尚未提升，无法降级`);
+    }
+
+    // 检查关联的 Resource 是否还存在
+    const resource = await this.resourceService.getByRid(member.resource_rid);
+
+    // 将 resource_rid 设置为 NULL，恢复为普通 File Member
+    await this.db.run(
+      'UPDATE container_members SET resource_rid = NULL WHERE id = ?',
+      [member.id]
+    );
+
+    return {
+      demoted: true,
+      container_rid: containerRid,
+      path: memberPath,
+      resource_rid: member.resource_rid,
+      resource_exists: !!resource
+    };
+  }
+
+  /**
    * 获取容器的成员统计
    * @param {string} containerRid
    * @returns {Promise<{ total: number, resources: number, files: number }>}

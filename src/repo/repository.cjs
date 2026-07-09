@@ -532,6 +532,33 @@ class Repository {
   }
 
   /**
+   * Demote: 将已提升的容器成员降级为普通文件成员
+   *
+   * 降级后的成员:
+   *   - resource_rid 被清除（设为 NULL）
+   *   - 不再关联独立 Resource
+   *   - Resource 本身不受影响（仍独立存在）
+   *
+   * @param {string} containerRid - 容器 RID
+   * @param {string} memberPath - 成员在容器中的路径
+   * @returns {Promise<object>} 降级结果
+   */
+  async demoteMember(containerRid, memberPath) {
+    const result = await this.containerService.demoteMember(containerRid, memberPath);
+
+    // 记录操作日志
+    if (this.syncOps) {
+      await this.syncOps.recordOp('member_demoted', result.resource_rid, {
+        container_rid: containerRid,
+        member_path: memberPath,
+        resource_exists: result.resource_exists
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * 获取容器成员统计
    * @param {string} containerRid
    */
