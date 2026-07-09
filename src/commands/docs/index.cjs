@@ -47,7 +47,8 @@ const SECTIONS = {
   'soft-delete': require('./soft-delete.cjs'),
   stack: require('./stack.cjs'),
   rid: require('./rid.cjs'),
-  operations: require('./operations.cjs')
+  operations: require('./operations.cjs'),
+  'resource-container': require('./resource-container.cjs')
 };
 
 const TOPIC_ALIASES = {
@@ -109,7 +110,13 @@ const TOPIC_ALIASES = {
   tracking: 'operations',
   events: 'operations',
   watcher: 'operations',
-  monitor: 'operations'
+  monitor: 'operations',
+  'resource-container': 'resource-container',
+  container: 'resource-container',
+  member: 'resource-container',
+  promote: 'resource-container',
+  resource: 'resource-container',
+  capability: 'resource-container'
 };
 
 function printIndex() {
@@ -136,6 +143,7 @@ function printIndex() {
     { id: 'stack',       name: '资源栈机制',       desc: '同名资源冲突自动冗余、layer 逻辑分层、stack 命令操作' },
     { id: 'rid',         name: 'RID 一等公民',       desc: 'RID 唯一标识、三级查找机制、name 与 RID 的关系' },
     { id: 'operations',  name: '操作追踪体系',       desc: 'OP_TYPES 详解、status/diff/sync 对比、FileWatcher、数据流' },
+    { id: 'resource-container', name: 'Resource 容器模型', desc: 'Resource/Container/Member 模型、Content Source、Promote 机制' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
 

@@ -17,7 +17,11 @@ class Database {
         if (err) {
           reject(err);
         } else {
-          resolve(this);
+          // 启用外键约束（SQLite 默认关闭）
+          this.db.run('PRAGMA foreign_keys = ON', (err2) => {
+            if (err2) reject(err2);
+            else resolve(this);
+          });
         }
       });
     });
@@ -63,6 +67,20 @@ class Database {
     // 数据迁移：为已有仓库添加 layer 列（栈层级，0=活跃，1~19=栈）
     try {
       await this.run('ALTER TABLE resources ADD COLUMN layer INTEGER NOT NULL DEFAULT 0');
+    } catch {
+      // 列已存在，忽略
+    }
+
+    // 数据迁移：为已有仓库添加 capabilities 列（JSON 数组，如 ["container"]）
+    try {
+      await this.run('ALTER TABLE resources ADD COLUMN capabilities TEXT DEFAULT \'[]\'');
+    } catch {
+      // 列已存在，忽略
+    }
+
+    // 数据迁移：为已有仓库添加 container_schema 列（JSON 对象，定义容器规则）
+    try {
+      await this.run('ALTER TABLE resources ADD COLUMN container_schema TEXT DEFAULT \'{}\'');
     } catch {
       // 列已存在，忽略
     }
@@ -177,6 +195,49 @@ class Database {
 
     await this.run(`
       CREATE INDEX IF NOT EXISTS idx_sync_ops_device ON sync_ops(device_id)
+    `);
+
+    // ── Resource、Container Capability 与 Member 模型 ──
+
+    // Content Source 表：关联 Resource 与实际内容来源
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS resource_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resource_rid TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        location TEXT NOT NULL,
+        metadata TEXT DEFAULT '{}',
+        FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
+      )
+    `);
+
+    await this.run(`
+      CREATE INDEX IF NOT EXISTS idx_resource_sources_rid ON resource_sources(resource_rid)
+    `);
+
+    // Container Members 表：具有 Container Capability 的 Resource 的成员
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS container_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        container_rid TEXT NOT NULL,
+        resource_rid TEXT,
+        path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        size INTEGER DEFAULT 0,
+        hash TEXT,
+        modified_time INTEGER,
+        metadata TEXT DEFAULT '{}',
+        FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
+        FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE SET NULL
+      )
+    `);
+
+    await this.run(`
+      CREATE INDEX IF NOT EXISTS idx_container_members_container ON container_members(container_rid)
+    `);
+
+    await this.run(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_container_members_path ON container_members(container_rid, path)
     `);
   }
 

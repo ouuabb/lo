@@ -5,6 +5,8 @@ const QueryEngine = require('./queryEngine.cjs');
 const FileWatcher = require('./fileWatcher.cjs');
 const StagingArea = require('./staging.cjs');
 const SyncOpsEngine = require('./syncOps.cjs');
+const ContainerService = require('./containerService.cjs');
+const SourceService = require('./sourceService.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
 const path = require('path');
@@ -21,6 +23,8 @@ class Repository {
     this.watcher = null;
     this.staging = new StagingArea(repoPath);
     this.syncOps = null;
+    this.containerService = null;
+    this.sourceService = null;
     /** @type {Buffer|null} 解密后的仓库加密密钥（仅存在于内存中） */
     this._cryptoKey = null;
   }
@@ -35,6 +39,10 @@ class Repository {
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
     this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
+    this.containerService = new ContainerService(this.db, this.resourceService, {
+      getCryptoKey: () => this._cryptoKey
+    });
+    this.sourceService = new SourceService(this.db);
     
     return this;
   }
@@ -51,6 +59,10 @@ class Repository {
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
     this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
+    this.containerService = new ContainerService(this.db, this.resourceService, {
+      getCryptoKey: () => this._cryptoKey
+    });
+    this.sourceService = new SourceService(this.db);
     
     // 门禁：检查 SSH 认证（管理类命令可跳过）
     if (!skipAuth) {
@@ -327,6 +339,204 @@ class Repository {
     }
     
     return result;
+  }
+
+  /**
+   * 创建具有 Container Capability 的资源
+   *
+   * 对应 `lo create resource project ./demo`:
+   *   - type: 资源类型 (project, album, dataset, collection 等)
+   *   - path: 内容来源目录
+   *   - capabilities: 自动根据 type 加载对应 capability（如 project → ["container"]）
+   *   - container_schema: 自动根据 type 加载容器规则
+   *
+   * @param {string} type - 资源类型
+   * @param {string} contentPath - 内容来源路径（目录或文件）
+   * @param {{ name?: string, capabilities?: string[], container_schema?: object, metadata?: object, scanMembers?: boolean }} options
+   * @returns {Promise<object>} 创建的 Resource
+   */
+  async createResourceWithContainer(type, contentPath, options = {}) {
+    const absPath = path.resolve(this.repoPath, contentPath);
+    const { name: customName, capabilities, container_schema, metadata = {},
+            scanMembers = true } = options;
+
+    // 根据 type 推导默认 capabilities 和 container_schema
+    const defaults = this._getContainerDefaults(type);
+    const finalCapabilities = capabilities || defaults.capabilities;
+    const finalSchema = container_schema || defaults.container_schema;
+
+    const resourceName = customName || path.basename(absPath);
+
+    // 创建 Resource（没有实际内容文件时使用目录路径作为占位）
+    const exists = await fs.pathExists(absPath);
+    if (!exists) {
+      throw new Error(`路径不存在: ${absPath}`);
+    }
+
+    const resource = await this.resourceService.create({
+      type,
+      path: absPath,
+      name: resourceName,
+      metadata: { ...metadata, title: resourceName },
+      capabilities: finalCapabilities,
+      container_schema: finalSchema
+    });
+
+    // 绑定 Content Source
+    const isDir = (await fs.stat(absPath)).isDirectory();
+    if (isDir) {
+      await this.sourceService.addLocalFolderSource(resource.rid, absPath);
+    } else {
+      await this.sourceService.addSource(resource.rid, 'local_file', absPath);
+    }
+
+    // 如果具有 container 能力且是目录，扫描成员
+    if (finalCapabilities.includes('container') && isDir && scanMembers) {
+      await this.containerService.scanSource(resource.rid, absPath);
+    }
+
+    // 记录操作日志
+    if (this.syncOps) {
+      await this.syncOps.recordOp(SyncOpsEngine.OP_TYPES.RESOURCE_CREATED, resource.rid, {
+        name: resource.name,
+        layer: resource.layer || 0,
+        type: resource.type,
+        path: path.relative(this.repoPath, absPath),
+        hash: resource.hash,
+        metadata: resource.metadata,
+        capabilities: resource.capabilities,
+        container_schema: resource.container_schema,
+        encrypted: resource.encrypted,
+        created: resource.created,
+        updated: resource.updated
+      });
+    }
+
+    return resource;
+  }
+
+  /**
+   * 根据资源类型获取默认的 capabilities 和 container_schema
+   */
+  _getContainerDefaults(type) {
+    const defaults = {
+      project: {
+        capabilities: ['container'],
+        container_schema: {
+          allowed_types: ['note', 'document', 'image', 'code', 'json', 'yaml', 'xml', 'csv', 'text']
+        }
+      },
+      album: {
+        capabilities: ['container'],
+        container_schema: {
+          allowed_types: ['image', 'video']
+        }
+      },
+      dataset: {
+        capabilities: ['container'],
+        container_schema: {
+          allowed_types: ['csv', 'json', 'yaml', 'xml']
+        }
+      },
+      course: {
+        capabilities: ['container'],
+        container_schema: {
+          allowed_types: ['note', 'video', 'audio', 'document', 'image', 'pdf']
+        }
+      },
+      collection: {
+        capabilities: ['container'],
+        container_schema: {
+          allowed_types: []  // 不限制
+        }
+      }
+    };
+
+    return defaults[type] || { capabilities: [], container_schema: {} };
+  }
+
+  /**
+   * 绑定 Content Source 到 Resource
+   * @param {string} resourceRid
+   * @param {string} sourceType - local_folder / git_repository 等
+   * @param {string} location
+   * @param {object} [metadata]
+   */
+  async bindSource(resourceRid, sourceType, location, metadata = {}) {
+    return this.sourceService.addSource(resourceRid, sourceType, location, metadata);
+  }
+
+  /**
+   * 获取 Resource 的 Content Source
+   * @param {string} resourceRid
+   */
+  async getResourceSources(resourceRid) {
+    return this.sourceService.getSources(resourceRid);
+  }
+
+  /**
+   * 扫描容器内容源，刷新成员列表
+   * @param {string} containerRid
+   */
+  async scanContainerMembers(containerRid) {
+    if (!await this.containerService.hasContainerCapability(containerRid)) {
+      throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
+    }
+    const sources = await this.sourceService.getLocalFolderSources(containerRid);
+    const results = [];
+    for (const src of sources) {
+      const scanResult = await this.containerService.scanSource(containerRid, src.location);
+      results.push({ source: src.location, ...scanResult });
+    }
+    return results;
+  }
+
+  /**
+   * 获取容器成员列表
+   * @param {string} containerRid
+   * @param {{ resourceOnly?: boolean, fileOnly?: boolean }} options
+   */
+  async getContainerMembers(containerRid, options = {}) {
+    return this.containerService.getMembers(containerRid, options);
+  }
+
+  /**
+   * Promote: 将容器中的文件成员提升为独立 Resource
+   *
+   * 提升后的文件:
+   *   - 拥有独立 RID
+   *   - 可以参与 Relation
+   *   - 仍然是容器的成员（resource_rid 指向新 Resource）
+   *
+   * @param {string} containerRid - 容器 RID
+   * @param {string} memberPath - 成员在容器中的路径
+   * @param {{ type?: string, metadata?: object }} options
+   * @returns {Promise<object>} 新创建的 Resource
+   */
+  async promoteMember(containerRid, memberPath, options = {}) {
+    const resource = await this.containerService.promoteMember(containerRid, memberPath, options);
+
+    // 记录操作日志
+    if (this.syncOps) {
+      await this.syncOps.recordOp('member_promoted', resource.rid, {
+        container_rid: containerRid,
+        member_path: memberPath,
+        name: resource.name,
+        type: resource.type,
+        hash: resource.hash,
+        metadata: resource.metadata
+      });
+    }
+
+    return resource;
+  }
+
+  /**
+   * 获取容器成员统计
+   * @param {string} containerRid
+   */
+  async getContainerMemberStats(containerRid) {
+    return this.containerService.getMemberStats(containerRid);
   }
 
   async getResource(rid) {

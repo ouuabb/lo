@@ -37,6 +37,8 @@ const serve = require('./commands/serve.cjs');
 const diff = require('./commands/diff.cjs');
 const stack = require('./commands/stack.cjs');
 const rm = require('./commands/rm.cjs');
+const resource = require('./commands/resource.cjs');
+const promote = require('./commands/promote.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -435,6 +437,50 @@ cli
         description: '要删除的文件路径'
       });
   }, rm)
+
+  .command('create', '创建资源', (yargs) => {
+    yargs
+      .command('resource <type> <path>', '创建具有 Container Capability 的 Resource', (yargs) => {
+        yargs
+          .positional('type', {
+            type: 'string',
+            description: '资源类型',
+            choices: ['project', 'album', 'dataset', 'course', 'collection']
+          })
+          .positional('path', {
+            type: 'string',
+            description: '内容来源路径（目录）'
+          })
+          .option('name', {
+            type: 'string',
+            description: '资源名称（默认使用目录名）'
+          })
+          .option('no-scan', {
+            type: 'boolean',
+            description: '跳过自动扫描成员',
+            default: false
+          });
+      }, resource)
+      .demandCommand(1, '请指定 create 的子命令');
+  })
+
+  .command('promote [path]', '将容器成员提升为独立 Resource', (yargs) => {
+    yargs
+      .positional('path', {
+        type: 'string',
+        description: '要提升的文件路径'
+      })
+      .option('container', {
+        type: 'string',
+        alias: 'c',
+        description: '容器 RID（不指定则自动查找）'
+      })
+      .option('type', {
+        type: 'string',
+        alias: 't',
+        description: 'Resource 类型（默认根据文件扩展名推导）'
+      });
+  }, promote)
 
   .command('commit', '提交暂存区到仓库', (yargs) => {
     yargs

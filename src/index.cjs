@@ -5,6 +5,8 @@ module.exports = {
   RelationService: require('./repo/relationService.cjs'),
   QueryEngine: require('./repo/queryEngine.cjs'),
   FileWatcher: require('./repo/fileWatcher.cjs'),
+  ContainerService: require('./repo/containerService.cjs'),
+  SourceService: require('./repo/sourceService.cjs'),
   Note: require('./core/note.cjs'),
   Scanner: require('./core/scanner.cjs'),
   Indexer: require('./core/indexer.cjs'),

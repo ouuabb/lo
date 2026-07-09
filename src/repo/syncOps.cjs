@@ -18,7 +18,9 @@ const OP_TYPES = {
   RESOURCE_UPDATED: 'resource_updated',
   RESOURCE_DELETED: 'resource_deleted',
   RESOURCE_MOVED: 'resource_moved',
-  RESOURCE_TAGGED: 'resource_tagged'
+  RESOURCE_TAGGED: 'resource_tagged',
+  MEMBER_PROMOTED: 'member_promoted',
+  CONTAINER_SCANNED: 'container_scanned'
 };
 
 class SyncOpsEngine {

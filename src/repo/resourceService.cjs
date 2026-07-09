@@ -77,9 +77,12 @@ class ResourceService {
    * @param {string} [resource.rid] - 预生成的 RID（可选，不提供则自动生成）
    * @param {string} resource.name - 资源逻辑名称（全局唯一）
    * @param {object} [resource.metadata] - 元数据
+   * @param {string[]} [resource.capabilities] - 能力列表（如 ["container"]）
+   * @param {object} [resource.container_schema] - 容器规则（如 allowed_types）
    */
   async create(resource) {
-    const { type, path: filePath, metadata: callerMeta = {}, rid: preRid } = resource;
+    const { type, path: filePath, metadata: callerMeta = {}, rid: preRid,
+            capabilities = [], container_schema = {} } = resource;
     let { name } = resource;
 
     if (!name) {
@@ -114,26 +117,35 @@ class ResourceService {
     const extracted = await this._extractMetadata(filePath, type);
     const metadata = assertMetadata({ ...extracted, ...callerMeta }, 'resourceService.create');
 
-    const contentBuffer = await fs.readFile(filePath);
-    const CryptoUtils = require('../utils/crypto.cjs');
+    // 检查 path 是否是目录（Container Resource 等场景）
+    const stats = await fs.stat(filePath);
+    const isDirectory = stats.isDirectory();
 
-    // 检测是否为已加密文件
-    const alreadyEncrypted = contentBuffer.length >= 4 &&
-      contentBuffer.subarray(0, 4).equals(CryptoUtils.MAGIC);
+    let plainHash = '';
+    let alreadyEncrypted = false;
+    let contentBuffer = null;
 
-    // 计算明文散列（用于变更检测），未加密文件直接散列，已加密文件需要先解密
-    let plainHash;
-    if (alreadyEncrypted) {
-      if (!this._cryptoKey) {
-        throw new Error(`文件已加密但无法获取解密密钥: ${filePath}。请确保已通过 SSH 认证。`);
-      }
-      const plaintext = CryptoUtils.decryptFile(contentBuffer, this._cryptoKey);
-      plainHash = HashUtils.fromBuffer(plaintext);
-    } else {
-      plainHash = HashUtils.fromBuffer(contentBuffer);
-      // 如果有加密密钥可用且文件未加密，则加密
-      if (this._cryptoKey) {
-        await CryptoUtils.writeEncryptedFile(filePath, contentBuffer, this._cryptoKey);
+    if (!isDirectory) {
+      contentBuffer = await fs.readFile(filePath);
+      const CryptoUtils = require('../utils/crypto.cjs');
+
+      // 检测是否为已加密文件
+      alreadyEncrypted = contentBuffer.length >= 4 &&
+        contentBuffer.subarray(0, 4).equals(CryptoUtils.MAGIC);
+
+      // 计算明文散列（用于变更检测），未加密文件直接散列，已加密文件需要先解密
+      if (alreadyEncrypted) {
+        if (!this._cryptoKey) {
+          throw new Error(`文件已加密但无法获取解密密钥: ${filePath}。请确保已通过 SSH 认证。`);
+        }
+        const plaintext = CryptoUtils.decryptFile(contentBuffer, this._cryptoKey);
+        plainHash = HashUtils.fromBuffer(plaintext);
+      } else {
+        plainHash = HashUtils.fromBuffer(contentBuffer);
+        // 如果有加密密钥可用且文件未加密，则加密
+        if (this._cryptoKey) {
+          await CryptoUtils.writeEncryptedFile(filePath, contentBuffer, this._cryptoKey);
+        }
       }
     }
 
@@ -142,11 +154,13 @@ class ResourceService {
     const encrypted = alreadyEncrypted || !!this._cryptoKey;
 
     await this.db.run(`
-      INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(metadata), encrypted ? 1 : 0, now, now]);
+      INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, capabilities, container_schema, created, updated)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(metadata), encrypted ? 1 : 0,
+        JSON.stringify(capabilities), JSON.stringify(container_schema), now, now]);
 
-    return { rid, name, layer, type, path: filePath, hash: plainHash, metadata, encrypted, created: now, updated: now };
+    return { rid, name, layer, type, path: filePath, hash: plainHash, metadata, encrypted,
+             capabilities, container_schema, created: now, updated: now };
   }
 
   async getByRid(rid) {
@@ -298,7 +312,7 @@ class ResourceService {
   }
 
   async update(rid, updates) {
-    const { path, hash, metadata } = updates;
+    const { path, hash, metadata, capabilities, container_schema } = updates;
     
     let sql = 'UPDATE resources SET updated = ?';
     const params = [Date.now()];
@@ -317,6 +331,16 @@ class ResourceService {
       const validated = assertMetadata(metadata, 'resourceService.update');
       sql += ', metadata = ?';
       params.push(JSON.stringify(validated));
+    }
+
+    if (capabilities !== undefined) {
+      sql += ', capabilities = ?';
+      params.push(JSON.stringify(capabilities));
+    }
+
+    if (container_schema !== undefined) {
+      sql += ', container_schema = ?';
+      params.push(JSON.stringify(container_schema));
     }
     
     sql += ' WHERE rid = ? AND deleted = 0';
@@ -471,6 +495,16 @@ class ResourceService {
     // 导致后续 sync 的 metadata 比较误判为变更。
     // sync 的增量检测直接使用 fs.stat().mtime。
 
+    // 目录（Container Resource）不提取文件级元数据
+    try {
+      const stats = await fs.stat(filePath);
+      if (stats.isDirectory()) {
+        return metadata;
+      }
+    } catch {
+      return metadata;
+    }
+
     if (type === 'note') {
       try {
         const content = await this._readFile(filePath, 'utf-8');
@@ -501,6 +535,8 @@ class ResourceService {
     return {
       ...row,
       metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+      capabilities: typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : (row.capabilities || []),
+      container_schema: typeof row.container_schema === 'string' ? JSON.parse(row.container_schema) : (row.container_schema || {}),
       encrypted: row.encrypted === 1 || row.encrypted === true
     };
   }

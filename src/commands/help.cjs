@@ -27,6 +27,8 @@ module.exports = function help(argv) {
   console.log('  serve         启动本地 HTTP API 服务');
 
   console.log('\n' + chalk.bold('资源管理:'));
+  console.log('  create resource   创建容器资源（project/album/dataset 等）');
+  console.log('  promote           将容器成员提升为独立 Resource');
   console.log('  link          建立资源链接');
   console.log('  unlink        解除资源链接');
   console.log('  move          移动资源');
