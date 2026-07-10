@@ -792,28 +792,14 @@ class Repository {
       }
     }
 
-    // 4. 按文件路径匹配
-    const resourcesDir = path.join(this.repoPath, 'resources');
-    let dirEntries = [];
-    try {
-      dirEntries = await fs.readdir(resourcesDir);
-    } catch (e) {
-      return null;
-    }
-
-    for (const entry of dirEntries) {
-      const fullPath = path.join(resourcesDir, entry);
-      // resources/Target.md 或 resources/YYYY-MM-DD-Target-xxxxxxxx.md
-      if (entry === target + '.md' || entry.endsWith('-' + target + '.md')) {
-        try {
-          const stat = await fs.stat(fullPath);
-          if (stat.isFile()) {
-            const r = await this.resourceService.getByPath(fullPath);
-            if (r) return r.rid;
-          }
-        } catch (e) {
-          // 跳过
-        }
+    // 4. 按文件路径匹配（从 DB 中搜索，而非扫描目录）
+    for (const r of all) {
+      if (!r.path) continue;
+      const basename = path.basename(r.path, path.extname(r.path));
+      const ext = path.extname(r.path);
+      // Target.md 或 YYYY-MM-DD-Target-xxxxxxxx.md
+      if (basename === target || basename.endsWith('-' + target)) {
+        return r.rid;
       }
     }
 
@@ -1186,6 +1172,12 @@ class Repository {
     
     switch (eventType) {
       case 'add':
+        // 如果文件属于某个 Container Source 目录，跳过 import
+        // 容器内容由 lo container scan 管，不由 FileWatcher 管
+        if (this.containerService) {
+          const inSource = await this.containerService.isInContainerSource(filePath);
+          if (inSource) return;
+        }
         if (ResourceType.isSupported(filePath)) {
           await this.importFile(filePath);
         }

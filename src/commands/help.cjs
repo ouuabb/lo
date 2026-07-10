@@ -5,7 +5,8 @@ module.exports = function help(argv) {
   console.log('  init          初始化资源仓库');
   console.log('  new           创建新资源（以 name/rid 标识，同名自动入栈）');
   console.log('  import        导入资源');
-  console.log('  list          列出所有资源');
+  console.log('  list           列出所有资源（资源视图，含容器/虚拟资源）');
+  console.log('  files          列出可操作文件（文件视图，仅显示 resources/ 下文件）');
   console.log('  show          查看资源（支持 rid / name / path 三级查找）');
   console.log('  edit          编辑资源');
   console.log('  delete        删除资源');

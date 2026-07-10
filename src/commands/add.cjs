@@ -12,14 +12,6 @@ async function add(argv) {
   await repo.open();
 
   const staging = new StagingArea(repoPath);
-  const resourcesDir = path.join(repoPath, 'resources');
-
-  if (!await fs.pathExists(resourcesDir)) {
-    console.log(chalk.red('resources 目录不存在'));
-    await repo.close();
-    process.exit(0);
-    return;
-  }
 
   if (!targetPath || targetPath === '.') {
     const count = await staging.addAll(repo);
@@ -36,8 +28,6 @@ async function add(argv) {
   const absPath = path.isAbsolute(targetPath)
     ? targetPath
     : path.join(repoPath, targetPath);
-
-  const relToResources = path.relative(resourcesDir, absPath);
 
   if (!absPath.startsWith(repoPath)) {
     console.log(chalk.red('文件必须在仓库目录下'));

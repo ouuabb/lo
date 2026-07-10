@@ -572,6 +572,29 @@ class ContainerService {
     }
   }
 
+  /**
+   * 检查指定文件路径是否属于某个 Container Source 目录。
+   * 用于 FileWatcher 判断是否该跳过 import。
+   *
+   * @param {string} filePath - 绝对文件路径
+   * @returns {Promise<boolean>}
+   */
+  async isInContainerSource(filePath) {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const sources = await this.db.all(
+      `SELECT * FROM resource_sources`
+    );
+
+    for (const src of sources) {
+      const normalizedSource = src.location.replace(/\\/g, '/');
+      if (normalizedPath.startsWith(normalizedSource + '/') || normalizedPath === normalizedSource) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   _hydrateMember(row) {
     return {
       ...row,

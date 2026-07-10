@@ -7,6 +7,7 @@ const packageJson = require('../package.json');
 const init = require('./commands/init.cjs');
 const newResource = require('./commands/new.cjs');
 const list = require('./commands/list.cjs');
+const files = require('./commands/files.cjs');
 const show = require('./commands/show.cjs');
 const edit = require('./commands/edit.cjs');
 const deleteResource = require('./commands/delete.cjs');
@@ -139,6 +140,37 @@ cli
         default: 'table'
       });
   }, list)
+
+  .command('files', '列出可操作文件（resources/ 目录下的文件）', (yargs) => {
+    yargs
+      .option('type', {
+        type: 'string',
+        description: '按类型过滤'
+      })
+      .option('status', {
+        type: 'boolean',
+        description: '仅显示有状态变更的文件'
+      })
+      .option('tag', {
+        type: 'string',
+        description: '按标签过滤'
+      })
+      .option('category', {
+        type: 'string',
+        description: '按分类过滤'
+      })
+      .option('limit', {
+        type: 'number',
+        description: '限制数量',
+        default: 20
+      })
+      .option('format', {
+        type: 'string',
+        description: '输出格式',
+        choices: ['table', 'json', 'list'],
+        default: 'table'
+      });
+  }, files)
 
   .command('show <rid>', '查看资源', (yargs) => {
     yargs
