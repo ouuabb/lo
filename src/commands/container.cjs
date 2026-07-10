@@ -85,12 +85,13 @@ async function promoteHandler(argv) {
  *
  * 示例:
  *   lo container status res_xxx
+ *   lo container status my-project
  */
 async function statusHandler(argv) {
-  const rid = argv.rid || argv._[2];
+  const identifier = argv.rid || argv._[2];
 
-  if (!rid) {
-    Logger.error('请指定容器 RID，例如: lo container status res_abc123');
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID），例如: lo container status res_abc123');
     process.exit(1);
     return;
   }
@@ -98,6 +99,14 @@ async function statusHandler(argv) {
   try {
     const repo = new Repository(process.cwd());
     await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
 
     const container = await repo.getResource(rid);
     if (!container) {
@@ -187,12 +196,13 @@ async function statusHandler(argv) {
  *
  * 示例:
  *   lo container scan res_xxx
+ *   lo container scan my-project
  */
 async function scanHandler(argv) {
-  const rid = argv.rid || argv._[2];
+  const identifier = argv.rid || argv._[2];
 
-  if (!rid) {
-    Logger.error('请指定容器 RID，例如: lo container scan res_abc123');
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID），例如: lo container scan res_abc123');
     process.exit(1);
     return;
   }
@@ -200,6 +210,14 @@ async function scanHandler(argv) {
   try {
     const repo = new Repository(process.cwd());
     await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
 
     const container = await repo.getResource(rid);
     if (!container) {
@@ -244,7 +262,7 @@ async function scanHandler(argv) {
 
     // 显示统计
     const stats = await repo.getContainerMemberStats(rid);
-    console.log(chalk.gray(`  总计 ${stats.total} 个成员 (${stats.resources} 已提升, ${stats.files} 普通文件)`));
+    console.log(chalk.gray(`  总计 ${stats.total} 个成员 (${stats.promoted} 已提升, ${stats.indexed} 普通文件, ${stats.deleted} 已删除)`));
 
     console.log('');
     await repo.close();
@@ -265,16 +283,17 @@ async function scanHandler(argv) {
  *
  * 示例:
  *   lo container list res_xxx
+ *   lo container list my-project
  *   lo container list res_xxx --resources    (仅列出已提升的)
  *   lo container list res_xxx --files         (仅列出未提升的)
  */
 async function listHandler(argv) {
-  const rid = argv.rid || argv._[2];
+  const identifier = argv.rid || argv._[2];
   const resourceOnly = argv.resources || false;
   const fileOnly = argv.files || false;
 
-  if (!rid) {
-    Logger.error('请指定容器 RID，例如: lo container list res_abc123');
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID），例如: lo container list res_abc123');
     process.exit(1);
     return;
   }
@@ -282,6 +301,14 @@ async function listHandler(argv) {
   try {
     const repo = new Repository(process.cwd());
     await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
 
     const container = await repo.getResource(rid);
     if (!container) {
@@ -302,9 +329,21 @@ async function listHandler(argv) {
       console.log(chalk.gray('  (空)'));
     } else {
       for (const m of members) {
-        const icon = m.resource_rid ? chalk.magenta('R') : chalk.gray('F');
-        const ridStr = m.resource_rid ? chalk.magenta(` ${m.resource_rid}`) : '';
-        console.log(`  ${icon} ${m.path}${ridStr}`);
+        let icon, statusText;
+        if (m.status === 'promoted') {
+          icon = chalk.magenta('R');
+          statusText = chalk.magenta(` ${m.resource_rid}`);
+        } else if (m.status === 'deleted') {
+          icon = chalk.red('D');
+          statusText = chalk.red(' (已删除)');
+        } else if (m.status === 'ignored') {
+          icon = chalk.gray('I');
+          statusText = chalk.gray(' (已忽略)');
+        } else {
+          icon = chalk.gray('F');
+          statusText = '';
+        }
+        console.log(`  ${icon} ${m.path}${statusText}`);
       }
     }
 
@@ -319,18 +358,117 @@ async function listHandler(argv) {
 }
 
 // ──────────────────────────────────────
+// lo container ignore <path>
+// ──────────────────────────────────────
+
+/**
+ * 忽略容器成员（从索引中排除，不删除记录）
+ *
+ * 示例:
+ *   lo container ignore docs/secret.md
+ *   lo container ignore docs/secret.md -c my-project
+ */
+async function ignoreHandler(argv) {
+  const memberPath = argv.path || argv._[2];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath) {
+    Logger.error('请指定要忽略的成员路径，例如: lo container ignore docs/secret.md');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const absPath = path.isAbsolute(memberPath)
+      ? memberPath
+      : path.join(process.cwd(), memberPath);
+
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, absPath);
+    if (!resolved) {
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const result = await repo.ignoreContainerMember(resolved.container.rid, resolved.relPath);
+    Logger.success(`已忽略: ${memberPath}`);
+    Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
+    Logger.info('  提示: 使用 lo container unignore <path> 取消忽略');
+
+    await repo.close();
+    process.exit(0);
+
+  } catch (error) {
+    Logger.error(`ignore 失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// lo container unignore <path>
+// ──────────────────────────────────────
+
+/**
+ * 取消忽略容器成员
+ *
+ * 示例:
+ *   lo container unignore docs/secret.md
+ */
+async function unignoreHandler(argv) {
+  const memberPath = argv.path || argv._[2];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath) {
+    Logger.error('请指定要取消忽略的成员路径，例如: lo container unignore docs/secret.md');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const absPath = path.isAbsolute(memberPath)
+      ? memberPath
+      : path.join(process.cwd(), memberPath);
+
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, absPath);
+    if (!resolved) {
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const result = await repo.unignoreContainerMember(resolved.container.rid, resolved.relPath);
+    Logger.success(`已取消忽略: ${memberPath}`);
+    Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
+
+    await repo.close();
+    process.exit(0);
+
+  } catch (error) {
+    Logger.error(`unignore 失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
 // 公共工具
 // ──────────────────────────────────────
 
-async function _resolveContainerAndPath(repo, containerRid, absPath) {
-  if (containerRid) {
-    const container = await repo.getResource(containerRid);
-    if (!container) {
-      Logger.error(`容器不存在: ${containerRid}`);
+async function _resolveContainerAndPath(repo, containerIdentifier, absPath) {
+  if (containerIdentifier) {
+    const rid = await repo.resolveContainer(containerIdentifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${containerIdentifier}`);
       return null;
     }
 
-    const sources = await repo.getResourceSources(containerRid);
+    const container = await repo.getResource(rid);
+    const sources = await repo.getResourceSources(rid);
     let relPath = null;
     for (const src of sources) {
       if (absPath.startsWith(src.location)) {
@@ -378,5 +516,7 @@ module.exports = {
   promote: promoteHandler,
   status: statusHandler,
   scan: scanHandler,
-  list: listHandler
+  list: listHandler,
+  ignore: ignoreHandler,
+  unignore: unignoreHandler
 };

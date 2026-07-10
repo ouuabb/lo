@@ -226,11 +226,17 @@ class Database {
         size INTEGER DEFAULT 0,
         hash TEXT,
         modified_time INTEGER,
+        status TEXT DEFAULT 'indexed',
+        created_at DATETIME DEFAULT (datetime('now')),
+        updated_at DATETIME DEFAULT (datetime('now')),
         metadata TEXT DEFAULT '{}',
         FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
         FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE SET NULL
       )
     `);
+
+    // 迁移：为旧数据库增加 status 列
+    await this._migrateContainerMembersV1();
 
     await this.run(`
       CREATE INDEX IF NOT EXISTS idx_container_members_container ON container_members(container_rid)
@@ -291,6 +297,40 @@ class Database {
         resolve();
       }
     });
+  }
+
+  /**
+   * 迁移 container_members 表：增加 status、created_at、updated_at 列
+   * 并为已有数据设置正确的 status 值
+   */
+  async _migrateContainerMembersV1() {
+    try {
+      // 检查 status 列是否存在
+      const colCheck = await this.get(
+        `PRAGMA table_info(container_members)`
+      );
+      // PRAGMA table_info 会返回多行，需要用 all
+      const columns = await this.all(`PRAGMA table_info(container_members)`);
+      const hasStatus = columns.some(c => c.name === 'status');
+
+      if (!hasStatus) {
+        console.log('[migrate] 为 container_members 增加 status/created_at/updated_at 列...');
+        await this.run(`ALTER TABLE container_members ADD COLUMN status TEXT DEFAULT 'indexed'`);
+        await this.run(`ALTER TABLE container_members ADD COLUMN created_at DATETIME DEFAULT (datetime('now'))`);
+        await this.run(`ALTER TABLE container_members ADD COLUMN updated_at DATETIME DEFAULT (datetime('now'))`);
+
+        // 已有 resource_rid 的 → promoted
+        await this.run(
+          `UPDATE container_members SET status = 'promoted' WHERE resource_rid IS NOT NULL`
+        );
+        console.log('[migrate] container_members 迁移完成');
+      }
+    } catch (e) {
+      // 列已存在时 ALTER TABLE 会报错，忽略
+      if (!e.message.includes('duplicate column')) {
+        console.error('[migrate] container_members 迁移失败:', e.message);
+      }
+    }
   }
 }
 

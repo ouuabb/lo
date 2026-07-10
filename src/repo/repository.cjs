@@ -567,6 +567,45 @@ class Repository {
   }
 
   /**
+   * 按名称或 RID 解析容器
+   * @param {string} identifier - 容器名称或 RID
+   * @returns {Promise<string|null>}
+   */
+  async resolveContainer(identifier) {
+    return this.containerService.resolve(identifier);
+  }
+
+  /**
+   * 忽略容器成员
+   * @param {string} containerRid
+   * @param {string} memberPath
+   */
+  async ignoreContainerMember(containerRid, memberPath) {
+    const result = await this.containerService.ignoreMember(containerRid, memberPath);
+    if (this.syncOps) {
+      await this.syncOps.recordOp('member_ignored', containerRid, {
+        member_path: memberPath
+      });
+    }
+    return result;
+  }
+
+  /**
+   * 取消忽略容器成员
+   * @param {string} containerRid
+   * @param {string} memberPath
+   */
+  async unignoreContainerMember(containerRid, memberPath) {
+    const result = await this.containerService.unignoreMember(containerRid, memberPath);
+    if (this.syncOps) {
+      await this.syncOps.recordOp('member_unignored', containerRid, {
+        member_path: memberPath
+      });
+    }
+    return result;
+  }
+
+  /**
    * 获取容器成员的内容变更差异（只读，不修改数据库）
    *
    * 遍历容器的所有 Content Source，对比文件系统与 container_members 表，

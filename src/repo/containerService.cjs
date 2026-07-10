@@ -73,7 +73,8 @@ class ContainerService {
 
     // 扫描文件
     const files = [];
-    await this._scanDir(sourceDir, sourceDir, recursive, files);
+    const ignorePatterns = await this.getIgnorePatterns(containerRid);
+    await this._scanDir(sourceDir, sourceDir, recursive, files, ignorePatterns);
 
     const result = { added: 0, skipped: 0, errors: [] };
 
@@ -117,25 +118,53 @@ class ContainerService {
 
   /**
    * 递归扫描目录
+   * @param {string} baseDir — 根目录
+   * @param {string} currentDir — 当前目录
+   * @param {boolean} recursive
+   * @param {Array} result
+   * @param {string[]} [ignorePatterns] — 要跳过的 glob 模式
    */
-  async _scanDir(baseDir, currentDir, recursive, result) {
+  async _scanDir(baseDir, currentDir, recursive, result, ignorePatterns = []) {
     try {
       const entries = await fs.readdir(currentDir, { withFileTypes: true });
       for (const entry of entries) {
         const absPath = path.join(currentDir, entry.name);
+        const relPath = path.relative(baseDir, absPath).replace(/\\/g, '/');
+
+        // 检查忽略规则
+        if (this._matchesIgnore(relPath, ignorePatterns)) continue;
+
         if (entry.isDirectory()) {
           if (recursive && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
-            await this._scanDir(baseDir, absPath, recursive, result);
+            await this._scanDir(baseDir, absPath, recursive, result, ignorePatterns);
           }
         } else if (entry.isFile()) {
           if (ResourceType.isSupported(absPath)) {
-            result.push({ absPath, relPath: path.relative(baseDir, absPath).replace(/\\/g, '/') });
+            result.push({ absPath, relPath });
           }
         }
       }
     } catch (e) {
       // 目录读取失败，静默跳过
     }
+  }
+
+  /**
+   * 检查路径是否匹配任一忽略模式（简单通配符匹配）
+   */
+  _matchesIgnore(relPath, patterns) {
+    return patterns.some(pattern => {
+      // 简单 glob：** 匹配任意层级，* 匹配单层
+      const regex = new RegExp(
+        '^' + pattern
+          .replace(/\./g, '\\.')
+          .replace(/\*\*/g, '§§GLOBSTAR§§')
+          .replace(/\*/g, '[^/]*')
+          .replace(/§§GLOBSTAR§§/g, '.*')
+        + '$'
+      );
+      return regex.test(relPath);
+    });
   }
 
   /**
@@ -168,21 +197,37 @@ class ContainerService {
     );
 
     if (existing) {
-      // 更新已有成员
+      // 如果之前是 deleted 状态，恢复为 indexed（或 promoted，若之前已提升）
+      const existingRow = await this.db.get(
+        'SELECT id, status, resource_rid FROM container_members WHERE container_rid = ? AND path = ?',
+        [containerRid, memberPath]
+      );
+      let newStatus = undefined;
+      if (existingRow && existingRow.status === 'deleted') {
+        // 保留提升状态：如果删除前是 promoted 成员，恢复后仍为 promoted
+        newStatus = existingRow.resource_rid ? 'promoted' : 'indexed';
+      }
+
+      const statusUpdate = newStatus ? ', status = ?' : '';
+      const params = newStatus
+        ? [name, size || 0, memberHash, modified_time || Date.now(),
+           JSON.stringify(metadata), newStatus, existing.id]
+        : [name, size || 0, memberHash, modified_time || Date.now(),
+           JSON.stringify(metadata), existing.id];
+
       await this.db.run(
         `UPDATE container_members
-         SET name = ?, size = ?, hash = ?, modified_time = ?, metadata = ?
+         SET name = ?, size = ?, hash = ?, modified_time = ?, metadata = ?, updated_at = datetime('now')${statusUpdate}
          WHERE id = ?`,
-        [name, size || 0, memberHash, modified_time || Date.now(),
-         JSON.stringify(metadata), existing.id]
+        params
       );
       return { id: existing.id, container_rid: containerRid, path: memberPath, updated: true };
     }
 
     // 插入新成员
     const result = await this.db.run(
-      `INSERT INTO container_members (container_rid, resource_rid, path, name, size, hash, modified_time, metadata)
-       VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO container_members (container_rid, resource_rid, path, name, size, hash, modified_time, status, metadata)
+       VALUES (?, NULL, ?, ?, ?, ?, ?, 'indexed', ?)`,
       [containerRid, memberPath, name, size || 0, memberHash || '',
        modified_time || Date.now(), JSON.stringify(metadata)]
     );
@@ -220,7 +265,7 @@ class ContainerService {
    * @returns {Promise<Array>}
    */
   async getMembers(containerRid, options = {}) {
-    const { resourceOnly = false, fileOnly = false } = options;
+    const { resourceOnly = false, fileOnly = false, status } = options;
 
     let sql = 'SELECT * FROM container_members WHERE container_rid = ?';
     const params = [containerRid];
@@ -229,6 +274,11 @@ class ContainerService {
       sql += ' AND resource_rid IS NOT NULL';
     } else if (fileOnly) {
       sql += ' AND resource_rid IS NULL';
+    }
+
+    if (status) {
+      sql += ' AND status = ?';
+      params.push(status);
     }
 
     sql += ' ORDER BY path ASC';
@@ -310,9 +360,9 @@ class ContainerService {
       capabilities: []
     });
 
-    // 更新 member 的 resource_rid
+    // 更新 member 的 resource_rid 和 status
     await this.db.run(
-      'UPDATE container_members SET resource_rid = ? WHERE id = ?',
+      `UPDATE container_members SET resource_rid = ?, status = 'promoted', updated_at = datetime('now') WHERE id = ?`,
       [resource.rid, member.id]
     );
 
@@ -360,9 +410,9 @@ class ContainerService {
     // 检查关联的 Resource 是否还存在
     const resource = await this.resourceService.getByRid(member.resource_rid);
 
-    // 将 resource_rid 设置为 NULL，恢复为普通 File Member
+    // 将 resource_rid 设置为 NULL，状态恢复为 indexed
     await this.db.run(
-      'UPDATE container_members SET resource_rid = NULL WHERE id = ?',
+      `UPDATE container_members SET resource_rid = NULL, status = 'indexed', updated_at = datetime('now') WHERE id = ?`,
       [member.id]
     );
 
@@ -382,18 +432,26 @@ class ContainerService {
    */
   async getMemberStats(containerRid) {
     const total = await this.db.get(
-      'SELECT COUNT(*) as count FROM container_members WHERE container_rid = ?',
+      `SELECT COUNT(*) as count FROM container_members
+       WHERE container_rid = ? AND status != 'ignored'`,
       [containerRid]
     );
-    const resources = await this.db.get(
-      'SELECT COUNT(*) as count FROM container_members WHERE container_rid = ? AND resource_rid IS NOT NULL',
+    const promoted = await this.db.get(
+      `SELECT COUNT(*) as count FROM container_members
+       WHERE container_rid = ? AND status = 'promoted'`,
+      [containerRid]
+    );
+    const deleted = await this.db.get(
+      `SELECT COUNT(*) as count FROM container_members
+       WHERE container_rid = ? AND status = 'deleted'`,
       [containerRid]
     );
 
     return {
       total: total ? total.count : 0,
-      resources: resources ? resources.count : 0,
-      files: (total ? total.count : 0) - (resources ? resources.count : 0)
+      promoted: promoted ? promoted.count : 0,
+      indexed: (total ? total.count : 0) - (promoted ? promoted.count : 0) - (deleted ? deleted.count : 0),
+      deleted: deleted ? deleted.count : 0
     };
   }
 
@@ -412,7 +470,8 @@ class ContainerService {
 
     // 1. 扫描文件系统
     const fsFiles = [];
-    await this._scanFilesForDiff(sourceDir, true, fsFiles);
+    const ignorePatterns = await this.getIgnorePatterns(containerRid);
+    await this._scanFilesForDiff(sourceDir, true, fsFiles, ignorePatterns);
 
     // 构建 相对路径 → 文件系统文件 的映射
     const fsMap = new Map();
@@ -421,10 +480,11 @@ class ContainerService {
       fsMap.set(relPath, f);
     }
 
-    // 2. 获取数据库中的成员
+    // 2. 获取数据库中的活跃成员（排除 ignored 和 deleted）
     const dbMembers = await this.getMembers(containerRid);
     const dbMap = new Map();
     for (const m of dbMembers) {
+      if (m.status === 'ignored' || m.status === 'deleted') continue;
       dbMap.set(m.path, m);
     }
 
@@ -528,10 +588,13 @@ class ContainerService {
       }
     }
 
-    // 删除
+    // 删除：标记为 deleted（软删除），保留历史记录
     for (const item of diff.deleted) {
       try {
-        await this.removeMember(containerRid, item.path);
+        await this.db.run(
+          `UPDATE container_members SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`,
+          [item.id]
+        );
         result.removed++;
       } catch (e) {
         result.errors.push({ file: item.path, error: e.message });
@@ -544,14 +607,18 @@ class ContainerService {
   /**
    * 扫描目录文件（供 diff 使用，返回带 hash 的文件列表）
    */
-  async _scanFilesForDiff(baseDir, recursive, result) {
+  async _scanFilesForDiff(baseDir, recursive, result, ignorePatterns = []) {
     try {
       const entries = await fs.readdir(baseDir, { withFileTypes: true });
       for (const entry of entries) {
         const absPath = path.join(baseDir, entry.name);
+        const relPath = path.relative(baseDir, absPath).replace(/\\/g, '/');
+
+        if (this._matchesIgnore(relPath, ignorePatterns)) continue;
+
         if (entry.isDirectory()) {
           if (recursive && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
-            await this._scanFilesForDiff(absPath, recursive, result);
+            await this._scanFilesForDiff(absPath, recursive, result, ignorePatterns);
           }
         } else if (entry.isFile()) {
           if (ResourceType.isSupported(absPath)) {
@@ -593,6 +660,84 @@ class ContainerService {
     }
 
     return false;
+  }
+
+  /**
+   * 按名称或 RID 解析容器。
+   * 优先匹配 RID，回退到按 name 查询（仅活跃层）。
+   *
+   * @param {string} identifier - 容器名称或 RID
+   * @returns {Promise<string|null>} 容器 RID，或 null
+   */
+  async resolve(identifier) {
+    // 1. 尝试 RID 匹配
+    const byRid = await this.resourceService.getByRid(identifier);
+    if (byRid && await this.hasContainerCapability(byRid.rid)) {
+      return byRid.rid;
+    }
+
+    // 2. 按名称匹配（活跃层）
+    const byName = await this.resourceService.getByName(identifier);
+    if (byName && await this.hasContainerCapability(byName.rid)) {
+      return byName.rid;
+    }
+
+    return null;
+  }
+
+  /**
+   * 获取容器的忽略规则。
+   * 从 container_schema.ignored_patterns 读取，合并内置排除项。
+   *
+   * @param {string} containerRid
+   * @returns {Promise<string[]>} glob 模式数组
+   */
+  async getIgnorePatterns(containerRid) {
+    const schema = await this.getContainerSchema(containerRid);
+    const builtin = ['node_modules/**', '.git/**', '.repo/**'];
+    const custom = schema.ignored_patterns || [];
+    return [...builtin, ...custom];
+  }
+
+  /**
+   * 忽略指定的 Container Member（从索引中排除，但不删除记录）。
+   *
+   * @param {string} containerRid
+   * @param {string} memberPath
+   * @returns {Promise<{ ignored: boolean }>}
+   */
+  async ignoreMember(containerRid, memberPath) {
+    const member = await this.getMember(containerRid, memberPath);
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}`);
+    }
+
+    await this.db.run(
+      `UPDATE container_members SET status = 'ignored', updated_at = datetime('now') WHERE id = ?`,
+      [member.id]
+    );
+
+    return { ignored: true, path: memberPath };
+  }
+
+  /**
+   * 取消忽略。
+   */
+  async unignoreMember(containerRid, memberPath) {
+    const member = await this.getMember(containerRid, memberPath);
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}`);
+    }
+    if (member.status !== 'ignored') {
+      throw new Error(`成员 "${memberPath}" 未被忽略`);
+    }
+
+    await this.db.run(
+      `UPDATE container_members SET status = 'indexed', updated_at = datetime('now') WHERE id = ?`,
+      [member.id]
+    );
+
+    return { unignored: true, path: memberPath };
   }
 
   _hydrateMember(row) {

@@ -496,7 +496,7 @@ cli
       .demandCommand(1, '请指定 create 的子命令');
   })
 
-  .command('container', '容器管理（提升/降级、状态、扫描、列表）', (yargs) => {
+  .command('container', '容器管理（提升/降级、状态、扫描、列表、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {
         yargs
@@ -507,7 +507,7 @@ cli
           .option('container', {
             type: 'string',
             alias: 'c',
-            description: '容器 RID（不指定则自动查找）'
+            description: '容器名称或 RID（不指定则自动查找）'
           })
           .option('type', {
             type: 'string',
@@ -522,27 +522,27 @@ cli
           });
       }, containerCmd.promote)
 
-      .command('status <rid>', '查看容器成员变更状态（对比文件系统与数据库）', (yargs) => {
+      .command('status [containerId]', '查看容器成员变更状态（对比文件系统与数据库）', (yargs) => {
         yargs
-          .positional('rid', {
+          .positional('containerId', {
             type: 'string',
-            description: '容器 Resource 的 RID'
+            description: '容器名称或 RID'
           });
       }, containerCmd.status)
 
-      .command('scan <rid>', '同步容器成员（将文件系统变化应用到数据库）', (yargs) => {
+      .command('scan [containerId]', '同步容器成员（将文件系统变化应用到数据库）', (yargs) => {
         yargs
-          .positional('rid', {
+          .positional('containerId', {
             type: 'string',
-            description: '容器 Resource 的 RID'
+            description: '容器名称或 RID'
           });
       }, containerCmd.scan)
 
-      .command('list <rid>', '列出容器所有成员', (yargs) => {
+      .command('list [containerId]', '列出容器所有成员', (yargs) => {
         yargs
-          .positional('rid', {
+          .positional('containerId', {
             type: 'string',
-            description: '容器 Resource 的 RID'
+            description: '容器名称或 RID'
           })
           .option('resources', {
             type: 'boolean',
@@ -556,7 +556,33 @@ cli
           });
       }, containerCmd.list)
 
-      .demandCommand(1, '请指定容器子命令。可用: promote, status, scan, list');
+      .command('ignore [path]', '忽略容器成员（从索引中排除）', (yargs) => {
+        yargs
+          .positional('path', {
+            type: 'string',
+            description: '要忽略的文件路径'
+          })
+          .option('container', {
+            type: 'string',
+            alias: 'c',
+            description: '容器名称或 RID（不指定则自动查找）'
+          });
+      }, containerCmd.ignore)
+
+      .command('unignore [path]', '取消忽略容器成员', (yargs) => {
+        yargs
+          .positional('path', {
+            type: 'string',
+            description: '要取消忽略的文件路径'
+          })
+          .option('container', {
+            type: 'string',
+            alias: 'c',
+            description: '容器名称或 RID（不指定则自动查找）'
+          });
+      }, containerCmd.unignore)
+
+      .demandCommand(1, '请指定容器子命令。可用: promote, status, scan, list, ignore, unignore');
   })
 
   .command('commit', '提交暂存区到仓库', (yargs) => {
