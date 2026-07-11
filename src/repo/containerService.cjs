@@ -2,6 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const HashUtils = require('../utils/hash.cjs');
 const ResourceType = require('../utils/resourceType.cjs');
+const MemberStateMachine = require('../domain/memberStateMachine.cjs');
 
 /**
  * ContainerService - 管理具有 Container Capability 的 Resource 的成员
@@ -10,6 +11,43 @@ const ResourceType = require('../utils/resourceType.cjs');
  *   - 从 Content Source 扫描并添加成员
  *   - 管理 container_members 表
  *   - Promote: 将普通 File Member 提升为独立 Resource
+ *
+ * ──────────── 冻结数据模型 (Phase 3.8) ────────────
+ *
+ * container_members:
+ *
+ *   字段                语义
+ *   ─────────────────────────────────────────
+ *   id                  PK
+ *   container_rid       所属容器 Resource RID
+ *   source_id           来源 source FK (ON DELETE SET NULL)
+ *   path                在 source 内的相对路径 (非全局唯一)
+ *   name                文件名
+ *   size                文件大小 (bytes)
+ *   hash                内容哈希
+ *   resource_rid        若已 promote，指向对应的独立 Resource
+ *   status              生命周期状态: indexed | promoted | deleted
+ *   force_ignore        同步策略: 0=参与同步, 1=跳过新增/修改但追踪删除
+ *   source_deleted_at   来源 source 被删除的时间 (NULL=未删除)
+ *   created / updated   时间戳
+ *
+ * 关键约束:
+ *   - UNIQUE(container_rid, source_id, path)   — 同一 source 内路径唯一
+ *   - FK source_id → resource_sources(id) ON DELETE SET NULL
+ *
+ * 语义边界:
+ *   - path       = source 内定位，不是全局路径（多 source 允许同名文件）
+ *   - resource_rid = 是否已升级为 Resource（不是文件身份）
+ *   - status       = 只描述生命周期，不描述同步策略
+ *   - force_ignore = 只描述同步策略，不改变生命周期状态
+ *   - source_deleted_at = 标记 source 已删除，用于历史追踪
+ *
+ * 同步链路:
+ *   CLI → Repository → SyncEngine.sync() → ContainerService._syncMembers()[内部]
+ *                                           → ContainerService._scanSource()[内部]
+ *                                           → ContainerService._diffMembers()[内部]
+ *
+ *   外部绝不应直接调用 _scanSource / _diffMembers / _syncMembers。
  */
 class ContainerService {
   /**
@@ -51,14 +89,10 @@ class ContainerService {
   }
 
   /**
-   * 扫描 Content Source 目录，将其中的文件作为成员添加到容器
-   * @param {string} containerRid - 容器 Resource 的 RID
-   * @param {string} sourceDir - 要扫描的源目录路径
-   * @param {{ recursive?: boolean, filter?: RegExp }} options
-   * @returns {Promise<{ added: number, skipped: number, errors: Array }>}
+   * @internal 仅供 ContainerSyncEngine 调用。扫描 Container Source 目录，将新文件加入 container_members。
    */
-  async scanSource(containerRid, sourceDir, options = {}) {
-    const { recursive = true, filter = null } = options;
+  async _scanSource(containerRid, sourceDir, options = {}) {
+    const { recursive = true, filter = null, sourceId } = options;
 
     if (!await this.hasContainerCapability(containerRid)) {
       throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
@@ -104,7 +138,8 @@ class ContainerService {
           name: path.basename(file.absPath),
           size: stats.size,
           hash: fileHash,
-          modified_time: stats.mtime.getTime()
+          modified_time: stats.mtime.getTime(),
+          sourceId
         });
 
         result.added++;
@@ -178,11 +213,12 @@ class ContainerService {
    * @param {string} member.hash - 内容哈希
    * @param {number} member.modified_time - 修改时间
    * @param {object} [member.metadata] - 元数据
+   * @param {number} [member.sourceId] - 来源 source id（新成员强烈建议提供）
    * @returns {Promise<object>}
    */
   async addMember(containerRid, member) {
     const { path: memberPath, absolutePath, name, size, hash,
-            modified_time, metadata = {} } = member;
+            modified_time, metadata = {}, sourceId = null } = member;
 
     // 计算 hash（如果提供了 absolutePath 但未提供 hash）
     let memberHash = hash;
@@ -190,11 +226,20 @@ class ContainerService {
       memberHash = await HashUtils.fromFile(absolutePath, this._cryptoKey);
     }
 
-    // 检查是否已存在
-    const existing = await this.db.get(
-      'SELECT id FROM container_members WHERE container_rid = ? AND path = ?',
-      [containerRid, memberPath]
-    );
+    // 检查是否已存在（含 source_id 区分多 source）
+    let existing;
+    if (sourceId != null) {
+      existing = await this.db.get(
+        'SELECT id FROM container_members WHERE container_rid = ? AND path = ? AND source_id = ?',
+        [containerRid, memberPath, sourceId]
+      );
+    } else {
+      // 向后兼容：无 source_id 时检查任意 source
+      existing = await this.db.get(
+        'SELECT id FROM container_members WHERE container_rid = ? AND path = ?',
+        [containerRid, memberPath]
+      );
+    }
 
     if (existing) {
       // 如果之前是 deleted 状态，恢复为 indexed（或 promoted，若之前已提升）
@@ -226,36 +271,13 @@ class ContainerService {
 
     // 插入新成员
     const result = await this.db.run(
-      `INSERT INTO container_members (container_rid, resource_rid, path, name, size, hash, modified_time, status, metadata)
-       VALUES (?, NULL, ?, ?, ?, ?, ?, 'indexed', ?)`,
-      [containerRid, memberPath, name, size || 0, memberHash || '',
+      `INSERT INTO container_members (container_rid, source_id, resource_rid, path, name, size, hash, modified_time, status, metadata)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'indexed', ?)`,
+      [containerRid, sourceId, memberPath, name, size || 0, memberHash || '',
        modified_time || Date.now(), JSON.stringify(metadata)]
     );
 
     return { id: result.lastID, container_rid: containerRid, path: memberPath, added: true };
-  }
-
-  /**
-   * 移除成员
-   * @param {string} containerRid
-   * @param {number|string} memberIdOrPath - 成员 ID 或路径
-   * @returns {Promise<{ removed: boolean }>}
-   */
-  async removeMember(containerRid, memberIdOrPath) {
-    let result;
-    if (typeof memberIdOrPath === 'number') {
-      result = await this.db.run(
-        'DELETE FROM container_members WHERE id = ? AND container_rid = ?',
-        [memberIdOrPath, containerRid]
-      );
-    } else {
-      result = await this.db.run(
-        'DELETE FROM container_members WHERE path = ? AND container_rid = ?',
-        [memberIdOrPath, containerRid]
-      );
-    }
-
-    return { removed: result.changes > 0 };
   }
 
   /**
@@ -291,9 +313,18 @@ class ContainerService {
    * 按路径获取单个成员
    * @param {string} containerRid
    * @param {string} memberPath
+   * @param {{ sourceId?: number }} options - 可选，指定 source 以区分多 source 同名文件
    * @returns {Promise<object|null>}
    */
-  async getMember(containerRid, memberPath) {
+  async getMember(containerRid, memberPath, options = {}) {
+    const { sourceId = null } = options;
+    if (sourceId != null) {
+      const row = await this.db.get(
+        'SELECT * FROM container_members WHERE container_rid = ? AND path = ? AND source_id = ?',
+        [containerRid, memberPath, sourceId]
+      );
+      return row ? this._hydrateMember(row) : null;
+    }
     const row = await this.db.get(
       'SELECT * FROM container_members WHERE container_rid = ? AND path = ?',
       [containerRid, memberPath]
@@ -311,38 +342,55 @@ class ContainerService {
    *
    * @param {string} containerRid - 容器 RID
    * @param {string} memberPath - 成员在容器中的路径
-   * @param {{ type?: string, metadata?: object }} options
+   * @param {{ sourceId?: number, type?: string, metadata?: object }} options
    * @returns {Promise<object>} 新创建的 Resource
    */
   async promoteMember(containerRid, memberPath, options = {}) {
-    const member = await this.getMember(containerRid, memberPath);
+    const { sourceId = null, type, metadata: meta = {} } = options;
+
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
     if (!member) {
-      throw new Error(`成员不存在: ${memberPath}`);
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
     }
 
     if (member.resource_rid) {
-      // 已经是 Resource Member，直接返回
       return this.resourceService.getByRid(member.resource_rid);
     }
 
-    // 获取容器 Resource 以确定绝对路径
+    // 状态机校验: indexed → promoted
+    MemberStateMachine.validate(member.status, 'promote', 'promoted');
+
     const container = await this.resourceService.getByRid(containerRid);
     if (!container) {
       throw new Error(`容器 Resource 不存在: ${containerRid}`);
     }
 
     // 从 Content Source 获取成员的绝对路径
-    const sources = await this.db.all(
-      'SELECT * FROM resource_sources WHERE resource_rid = ?',
-      [containerRid]
-    );
-
     let absolutePath = null;
-    for (const src of sources) {
-      const candidate = path.join(src.location, memberPath).replace(/\\/g, '/');
-      if (await fs.pathExists(candidate)) {
-        absolutePath = candidate;
-        break;
+    if (sourceId != null) {
+      // 指定 source 时，直接用该 source 的 location
+      const source = await this.db.get(
+        'SELECT * FROM resource_sources WHERE id = ?',
+        [sourceId]
+      );
+      if (source) {
+        const candidate = path.join(source.location, memberPath).replace(/\\/g, '/');
+        if (await fs.pathExists(candidate)) {
+          absolutePath = candidate;
+        }
+      }
+    } else {
+      // 向后兼容：遍历所有 source
+      const sources = await this.db.all(
+        'SELECT * FROM resource_sources WHERE resource_rid = ?',
+        [containerRid]
+      );
+      for (const src of sources) {
+        const candidate = path.join(src.location, memberPath).replace(/\\/g, '/');
+        if (await fs.pathExists(candidate)) {
+          absolutePath = candidate;
+          break;
+        }
       }
     }
 
@@ -351,12 +399,12 @@ class ContainerService {
     }
 
     // 创建 Resource
-    const resourceType = options.type || ResourceType.fromPath(absolutePath);
+    const resourceType = type || ResourceType.fromPath(absolutePath);
     const resource = await this.resourceService.create({
       type: resourceType,
       path: absolutePath,
       name: member.name.replace(/\.[^.]+$/, ''),  // 去掉扩展名
-      metadata: options.metadata || {},
+      metadata: meta,
       capabilities: []
     });
 
@@ -385,44 +433,36 @@ class ContainerService {
   /**
    * Demote: 将已提升的 Resource Member 降级为普通 File Member
    *
-   * 流程:
-   *   1. 找到容器中的成员记录
-   *   2. 将 resource_rid 设置为 NULL
-   *   3. 成员恢复为普通文件成员（不再关联独立 Resource）
-   *
-   * 注意: 降级不会删除 Resource 本身，Resource 仍然独立存在。
-   * 如需删除 Resource，请使用 lo delete <rid>。
-   *
-   * @param {string} containerRid - 容器 RID
-   * @param {string} memberPath - 成员在容器中的路径
-   * @returns {Promise<object>} { demoted: true, resource_rid: string }
+   * @param {string} containerRid
+   * @param {string} memberPath
+   * @param {{ sourceId?: number }} options
+   * @returns {Promise<{ demoted: boolean, previousResourceRid: string }>}
    */
-  async demoteMember(containerRid, memberPath) {
-    const member = await this.getMember(containerRid, memberPath);
+  async demoteMember(containerRid, memberPath, options = {}) {
+    const { sourceId = null } = options;
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
     if (!member) {
-      throw new Error(`成员不存在: ${memberPath}`);
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
     }
 
     if (!member.resource_rid) {
-      throw new Error(`成员 "${memberPath}" 尚未提升，无法降级`);
+      throw new Error(
+        `成员 "${memberPath}" 尚未提升为 Resource`
+      );
     }
 
-    // 检查关联的 Resource 是否还存在
-    const resource = await this.resourceService.getByRid(member.resource_rid);
+    // 状态机校验: promoted → indexed
+    MemberStateMachine.validate(member.status, 'demote', 'indexed');
 
-    // 将 resource_rid 设置为 NULL，状态恢复为 indexed
+    const rid = member.resource_rid;
+
+    // 清除 resource_rid，状态变为 indexed
     await this.db.run(
       `UPDATE container_members SET resource_rid = NULL, status = 'indexed', updated_at = datetime('now') WHERE id = ?`,
       [member.id]
     );
 
-    return {
-      demoted: true,
-      container_rid: containerRid,
-      path: memberPath,
-      resource_rid: member.resource_rid,
-      resource_exists: !!resource
-    };
+    return { demoted: true, previousResourceRid: rid };
   }
 
   /**
@@ -456,14 +496,11 @@ class ContainerService {
   }
 
   /**
-   * 对比文件系统与数据库，返回成员差异
-   * 不修改数据库，纯只读操作。
-   *
-   * @param {string} containerRid
-   * @param {string} sourceDir - Content Source 目录绝对路径
-   * @returns {Promise<{ added: Array, modified: Array, deleted: Array, unchanged: number }>}
+   * @internal 仅供 ContainerSyncEngine 调用。计算当前文件系统与数据库快照之间的差异（只读）。
    */
-  async diffMembers(containerRid, sourceDir) {
+  async _diffMembers(containerRid, sourceDir, options = {}) {
+    const { sourceId } = options;
+
     if (!await fs.pathExists(sourceDir)) {
       throw new Error(`源目录不存在: ${sourceDir}`);
     }
@@ -480,11 +517,13 @@ class ContainerService {
       fsMap.set(relPath, f);
     }
 
-    // 2. 获取数据库中的活跃成员（排除 ignored 和 deleted）
+    // 2. 获取数据库中的活跃成员，按 source_id 过滤
     const dbMembers = await this.getMembers(containerRid);
     const dbMap = new Map();
     for (const m of dbMembers) {
-      if (m.status === 'ignored' || m.status === 'deleted') continue;
+      if (m.status === 'deleted') continue;
+      // 多 source 场景：只比较属于当前 source 的成员
+      if (sourceId != null && m.source_id != null && m.source_id !== sourceId) continue;
       dbMap.set(m.path, m);
     }
 
@@ -494,9 +533,11 @@ class ContainerService {
     const deleted = [];
     let unchanged = 0;
 
-    // 文件系统中的文件：新增 or 修改 or 未变
+    // 文件系统中的文件：新增 or 修改 or 未变（跳过 force_ignored）
     for (const [relPath, fsFile] of fsMap) {
       const dbMember = dbMap.get(relPath);
+
+      if (dbMember && dbMember.force_ignore) continue;
 
       if (!dbMember) {
         // 文件系统中存在，数据库中没有 → 新增
@@ -546,14 +587,11 @@ class ContainerService {
   }
 
   /**
-   * 同步：将 diffMembers 的差异应用到数据库
-   *
-   * @param {string} containerRid
-   * @param {string} sourceDir
-   * @returns {Promise<{ added: number, updated: number, removed: number, errors: Array }>}
+   * @internal 仅供 ContainerSyncEngine 调用。同步：将 diff 差异应用到数据库。
    */
-  async syncMembers(containerRid, sourceDir) {
-    const diff = await this.diffMembers(containerRid, sourceDir);
+  async _syncMembers(containerRid, sourceDir, options = {}) {
+    const { sourceId } = options;
+    const diff = await this._diffMembers(containerRid, sourceDir, { sourceId });
     const result = { added: 0, updated: 0, removed: 0, errors: [] };
 
     // 新增
@@ -564,7 +602,8 @@ class ContainerService {
           name: item.name,
           size: item.size,
           hash: item.hash,
-          modified_time: item.modified_time
+          modified_time: item.modified_time,
+          sourceId
         });
         result.added++;
       } catch (e) {
@@ -580,7 +619,8 @@ class ContainerService {
           name: item.name,
           size: item.size,
           hash: item.hash,
-          modified_time: item.modified_time
+          modified_time: item.modified_time,
+          sourceId
         });
         result.updated++;
       } catch (e) {
@@ -700,20 +740,22 @@ class ContainerService {
   }
 
   /**
-   * 忽略指定的 Container Member（从索引中排除，但不删除记录）。
+   * 强制忽略指定的 Container Member（通过 force_ignore 标记，不改变生命周期状态）。
    *
    * @param {string} containerRid
    * @param {string} memberPath
+   * @param {{ sourceId?: number }} options
    * @returns {Promise<{ ignored: boolean }>}
    */
-  async ignoreMember(containerRid, memberPath) {
-    const member = await this.getMember(containerRid, memberPath);
+  async ignoreMember(containerRid, memberPath, options = {}) {
+    const { sourceId = null } = options;
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
     if (!member) {
-      throw new Error(`成员不存在: ${memberPath}`);
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
     }
 
     await this.db.run(
-      `UPDATE container_members SET status = 'ignored', updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE container_members SET force_ignore = 1, updated_at = datetime('now') WHERE id = ?`,
       [member.id]
     );
 
@@ -721,23 +763,206 @@ class ContainerService {
   }
 
   /**
-   * 取消忽略。
+   * 取消强制忽略。
    */
-  async unignoreMember(containerRid, memberPath) {
-    const member = await this.getMember(containerRid, memberPath);
+  async unignoreMember(containerRid, memberPath, options = {}) {
+    const { sourceId = null } = options;
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
     if (!member) {
-      throw new Error(`成员不存在: ${memberPath}`);
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
     }
-    if (member.status !== 'ignored') {
-      throw new Error(`成员 "${memberPath}" 未被忽略`);
+    if (!member.force_ignore) {
+      throw new Error(`成员 "${memberPath}" 未被强制忽略`);
     }
 
     await this.db.run(
-      `UPDATE container_members SET status = 'indexed', updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE container_members SET force_ignore = 0, updated_at = datetime('now') WHERE id = ?`,
       [member.id]
     );
 
     return { unignored: true, path: memberPath };
+  }
+
+  // ────────── Phase 4.1: Member API 补全 ──────────
+
+  /**
+   * 重命名成员路径（仅更新 DB，不动文件系统）。
+   *
+   * @param {string} containerRid
+   * @param {string} memberPath - 当前路径
+   * @param {string} newPath - 新路径
+   * @param {{ sourceId?: number }} options
+   * @returns {Promise<{ renamed: boolean, oldPath: string, newPath: string }>}
+   */
+  async renameMember(containerRid, memberPath, newPath, options = {}) {
+    const { sourceId = null } = options;
+
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
+    }
+
+    // 检查目标路径是否已被占用（排除已删除的）
+    const existing = await this.getMember(containerRid, newPath, { sourceId });
+    if (existing && existing.status !== 'deleted') {
+      throw new Error(`目标路径已存在: ${newPath}`);
+    }
+
+    await this.db.run(
+      `UPDATE container_members SET path = ?, name = ?, updated_at = datetime('now') WHERE id = ?`,
+      [newPath, member.name, member.id]
+    );
+
+    return { renamed: true, oldPath: memberPath, newPath };
+  }
+
+  /**
+   * 软删除成员（status → deleted，保留 resource_rid 和历史记录）。
+   *
+   * @param {string} containerRid
+   * @param {string} memberPath
+   * @param {{ sourceId?: number }} options
+   * @returns {Promise<{ removed: boolean }>}
+   */
+  async removeMember(containerRid, memberPath, options = {}) {
+    const { sourceId = null } = options;
+
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
+    }
+
+    if (member.status === 'deleted') {
+      throw new Error(`成员已被删除: ${memberPath}`);
+    }
+
+    // 状态机校验: indexed|promoted → deleted
+    MemberStateMachine.validate(member.status, 'remove', 'deleted');
+
+    await this.db.run(
+      `UPDATE container_members SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`,
+      [member.id]
+    );
+
+    return { removed: true, path: memberPath };
+  }
+
+  /**
+   * 恢复已删除的成员。
+   * 如果删除前已提升（resource_rid 存在），恢复为 promoted；
+   * 否则恢复为 indexed。
+   *
+   * @param {string} containerRid
+   * @param {string} memberPath
+   * @param {{ sourceId?: number }} options
+   * @returns {Promise<{ restored: boolean, status: string }>}
+   */
+  async restoreMember(containerRid, memberPath, options = {}) {
+    const { sourceId = null } = options;
+
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
+    }
+
+    if (member.status !== 'deleted') {
+      throw new Error(`成员未被删除，当前状态: ${member.status}`);
+    }
+
+    const newStatus = member.resource_rid ? 'promoted' : 'indexed';
+
+    // 状态机校验: deleted → indexed|promoted
+    MemberStateMachine.validate(member.status, 'restore', newStatus);
+
+    await this.db.run(
+      `UPDATE container_members SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+      [newStatus, member.id]
+    );
+
+    return { restored: true, path: memberPath, status: newStatus };
+  }
+
+  /**
+   * 将成员移动到另一个容器。
+   *
+   * @param {string} containerRid - 源容器
+   * @param {string} memberPath
+   * @param {string} targetContainerRid - 目标容器
+   * @param {{ sourceId?: number }} options
+   * @returns {Promise<{ moved: boolean }>}
+   */
+  async moveMember(containerRid, memberPath, targetContainerRid, options = {}) {
+    const { sourceId = null } = options;
+
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
+    }
+
+    if (!await this.hasContainerCapability(targetContainerRid)) {
+      throw new Error(`目标容器不具有 Container Capability: ${targetContainerRid}`);
+    }
+
+    if (containerRid === targetContainerRid) {
+      throw new Error('源容器与目标容器相同');
+    }
+
+    // 检查目标容器中是否已有同名路径
+    const existing = await this.db.get(
+      'SELECT id FROM container_members WHERE container_rid = ? AND path = ? AND status != ?',
+      [targetContainerRid, memberPath, 'deleted']
+    );
+    if (existing) {
+      throw new Error(`目标容器中已存在路径: ${memberPath}`);
+    }
+
+    await this.db.run(
+      `UPDATE container_members SET container_rid = ?, updated_at = datetime('now') WHERE id = ?`,
+      [targetContainerRid, member.id]
+    );
+
+    return { moved: true, path: memberPath, from: containerRid, to: targetContainerRid };
+  }
+
+  /**
+   * 复制成员到另一个容器。
+   *
+   * @param {string} containerRid - 源容器
+   * @param {string} memberPath
+   * @param {string} targetContainerRid - 目标容器
+   * @param {{ sourceId?: number }} options
+   * @returns {Promise<object>} 新创建的成员记录
+   */
+  async copyMember(containerRid, memberPath, targetContainerRid, options = {}) {
+    const { sourceId = null } = options;
+
+    const member = await this.getMember(containerRid, memberPath, { sourceId });
+    if (!member) {
+      throw new Error(`成员不存在: ${memberPath}` + (sourceId ? ` (source ${sourceId})` : ''));
+    }
+
+    if (!await this.hasContainerCapability(targetContainerRid)) {
+      throw new Error(`目标容器不具有 Container Capability: ${targetContainerRid}`);
+    }
+
+    // 检查目标容器中是否已有同名路径
+    const existing = await this.db.get(
+      'SELECT id FROM container_members WHERE container_rid = ? AND path = ? AND status != ?',
+      [targetContainerRid, memberPath, 'deleted']
+    );
+    if (existing) {
+      throw new Error(`目标容器中已存在路径: ${memberPath}`);
+    }
+
+    // 插入新成员记录（identity 保留，但 id 全新）
+    const result = await this.db.run(
+      `INSERT INTO container_members (container_rid, source_id, resource_rid, path, name, size, hash, modified_time, status, force_ignore, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'indexed', 0, ?)`,
+      [targetContainerRid, member.source_id, member.resource_rid, member.path, member.name,
+       member.size, member.hash, member.modified_time, JSON.stringify(member.metadata || {})]
+    );
+
+    return { copied: true, id: result.lastID, path: memberPath, to: targetContainerRid };
   }
 
   _hydrateMember(row) {

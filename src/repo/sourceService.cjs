@@ -40,6 +40,7 @@ class SourceService {
    * @returns {Promise<object>}
    */
   async addSource(resourceRid, sourceType, location, metadata = {}) {
+    const now = Date.now();
     // 检查是否已存在（同 resource + location 不重复绑定）
     const existing = await this.db.get(
       'SELECT id FROM resource_sources WHERE resource_rid = ? AND location = ?',
@@ -49,17 +50,17 @@ class SourceService {
     if (existing) {
       // 更新已有记录
       await this.db.run(
-        `UPDATE resource_sources SET source_type = ?, metadata = ? WHERE id = ?`,
-        [sourceType, JSON.stringify(metadata), existing.id]
+        `UPDATE resource_sources SET source_type = ?, metadata = ?, updated_at = ? WHERE id = ?`,
+        [sourceType, JSON.stringify(metadata), now, existing.id]
       );
       return { id: existing.id, resource_rid: resourceRid, source_type: sourceType,
                location, metadata, updated: true };
     }
 
     const result = await this.db.run(
-      `INSERT INTO resource_sources (resource_rid, source_type, location, metadata)
-       VALUES (?, ?, ?, ?)`,
-      [resourceRid, sourceType, location, JSON.stringify(metadata)]
+      `INSERT INTO resource_sources (resource_rid, source_type, location, enabled, sync_mode, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 'manual', ?, ?, ?)`,
+      [resourceRid, sourceType, location, JSON.stringify(metadata), now, now]
     );
 
     return { id: result.lastID, resource_rid: resourceRid, source_type: sourceType,
@@ -97,6 +98,25 @@ class SourceService {
    * @returns {Promise<{ removed: boolean }>}
    */
   async removeSource(resourceRid, sourceIdOrLocation) {
+    // 先记录时间戳，标记受影响成员（在 FK CASCADE SET NULL 之前）
+    let sourceId;
+    if (typeof sourceIdOrLocation === 'number') {
+      sourceId = sourceIdOrLocation;
+    } else {
+      const src = await this.db.get(
+        'SELECT id FROM resource_sources WHERE location = ? AND resource_rid = ?',
+        [sourceIdOrLocation, resourceRid]
+      );
+      if (src) sourceId = src.id;
+    }
+
+    if (sourceId) {
+      await this.db.run(
+        `UPDATE container_members SET source_deleted_at = datetime('now') WHERE source_id = ?`,
+        [sourceId]
+      );
+    }
+
     let result;
     if (typeof sourceIdOrLocation === 'number') {
       result = await this.db.run(
@@ -170,6 +190,44 @@ class SourceService {
       ...row,
       metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata || {})
     };
+  }
+
+  /**
+   * 启用 / 禁用 Content Source
+   * @param {number} sourceId
+   * @param {boolean} enabled
+   */
+  async setEnabled(sourceId, enabled) {
+    const now = Date.now();
+    await this.db.run(
+      `UPDATE resource_sources SET enabled = ?, updated_at = ? WHERE id = ?`,
+      [enabled ? 1 : 0, now, sourceId]
+    );
+    return { id: sourceId, enabled: !!enabled };
+  }
+
+  /**
+   * 更新 Content Source 的同步模式
+   * @param {number} sourceId
+   * @param {'manual'|'auto'} mode
+   */
+  async setSyncMode(sourceId, mode) {
+    const now = Date.now();
+    await this.db.run(
+      `UPDATE resource_sources SET sync_mode = ?, updated_at = ? WHERE id = ?`,
+      [mode, now, sourceId]
+    );
+  }
+
+  /**
+   * 获取所有启用的 Content Source（跨所有 Resource）
+   * @returns {Promise<Array>}
+   */
+  async getEnabledSources() {
+    const rows = await this.db.all(
+      `SELECT * FROM resource_sources WHERE enabled = 1`
+    );
+    return rows.map(row => this._hydrate(row));
   }
 }
 

@@ -7,6 +7,12 @@ const StagingArea = require('./staging.cjs');
 const SyncOpsEngine = require('./syncOps.cjs');
 const ContainerService = require('./containerService.cjs');
 const SourceService = require('./sourceService.cjs');
+const ContainerSyncEngine = require('./containerSyncEngine.cjs');
+const SyncConfigService = require('./syncConfigService.cjs');
+const OperationRegistry = require('./operationRegistry.cjs');
+const OperationEngine = require('./operationEngine.cjs');
+const TransactionEngine = require('./transactionEngine.cjs');
+const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
 const path = require('path');
@@ -23,8 +29,14 @@ class Repository {
     this.watcher = null;
     this.staging = new StagingArea(repoPath);
     this.syncOps = null;
+    this.operationLogger = null;
+    this.operationRegistry = null;
+    this.operationEngine = null;
+    this.transactionEngine = null;
     this.containerService = null;
     this.sourceService = null;
+    this.syncEngine = null;
+    this.syncConfigService = null;
     /** @type {Buffer|null} 解密后的仓库加密密钥（仅存在于内存中） */
     this._cryptoKey = null;
   }
@@ -42,7 +54,12 @@ class Repository {
     this.containerService = new ContainerService(this.db, this.resourceService, {
       getCryptoKey: () => this._cryptoKey
     });
+    this._initOperationEngine();
     this.sourceService = new SourceService(this.db);
+    this.syncEngine = new ContainerSyncEngine(this.db, this.containerService, this.sourceService, {
+      getCryptoKey: () => this._cryptoKey
+    });
+    this.syncConfigService = new SyncConfigService(this.db);
     
     return this;
   }
@@ -62,7 +79,12 @@ class Repository {
     this.containerService = new ContainerService(this.db, this.resourceService, {
       getCryptoKey: () => this._cryptoKey
     });
+    this._initOperationEngine();
     this.sourceService = new SourceService(this.db);
+    this.syncEngine = new ContainerSyncEngine(this.db, this.containerService, this.sourceService, {
+      getCryptoKey: () => this._cryptoKey
+    });
+    this.syncConfigService = new SyncConfigService(this.db);
     
     // 门禁：检查 SSH 认证（管理类命令可跳过）
     if (!skipAuth) {
@@ -392,7 +414,7 @@ class Repository {
 
     // 如果具有 container 能力且是目录，扫描成员
     if (finalCapabilities.includes('container') && isDir && scanMembers) {
-      await this.containerService.scanSource(resource.rid, absPath);
+      await this.syncEngine.scan(resource.rid);
     }
 
     // 记录操作日志
@@ -482,12 +504,7 @@ class Repository {
     if (!await this.containerService.hasContainerCapability(containerRid)) {
       throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
     }
-    const sources = await this.sourceService.getLocalFolderSources(containerRid);
-    const results = [];
-    for (const src of sources) {
-      const scanResult = await this.containerService.scanSource(containerRid, src.location);
-      results.push({ source: src.location, ...scanResult });
-    }
+    const { results } = await this.syncEngine.scan(containerRid);
     return results;
   }
 
@@ -510,7 +527,7 @@ class Repository {
    *
    * @param {string} containerRid - 容器 RID
    * @param {string} memberPath - 成员在容器中的路径
-   * @param {{ type?: string, metadata?: object }} options
+   * @param {{ sourceId?: number, type?: string, metadata?: object }} options
    * @returns {Promise<object>} 新创建的 Resource
    */
   async promoteMember(containerRid, memberPath, options = {}) {
@@ -543,8 +560,8 @@ class Repository {
    * @param {string} memberPath - 成员在容器中的路径
    * @returns {Promise<object>} 降级结果
    */
-  async demoteMember(containerRid, memberPath) {
-    const result = await this.containerService.demoteMember(containerRid, memberPath);
+  async demoteMember(containerRid, memberPath, options = {}) {
+    const result = await this.containerService.demoteMember(containerRid, memberPath, options);
 
     // 记录操作日志
     if (this.syncOps) {
@@ -571,17 +588,45 @@ class Repository {
    * @param {string} identifier - 容器名称或 RID
    * @returns {Promise<string|null>}
    */
+  _initOperationEngine() {
+    this.operationRegistry = new OperationRegistry();
+
+    // 自动加载 src/operations/ 下的所有 handler（Phase 4.5）
+    loadOperations(this.operationRegistry);
+
+    this.operationEngine = new OperationEngine(this.db, this.operationRegistry, this.containerService);
+    this.transactionEngine = new TransactionEngine(this.db, this.operationEngine);
+  }
+
   async resolveContainer(identifier) {
     return this.containerService.resolve(identifier);
+  }
+
+  /**
+   * 标记 Container 为 dirty（内容源文件变更，等待 sync）
+   * @param {string} containerRid
+   */
+  async markContainerDirty(containerRid) {
+    return this.syncEngine.markDirty(containerRid);
+  }
+
+  /**
+   * 检查 Container 是否有待同步的变更
+   * @param {string} containerRid
+   * @returns {Promise<boolean>}
+   */
+  async isContainerDirty(containerRid) {
+    return this.syncEngine.isDirty(containerRid);
   }
 
   /**
    * 忽略容器成员
    * @param {string} containerRid
    * @param {string} memberPath
+   * @param {number} [sourceId]
    */
-  async ignoreContainerMember(containerRid, memberPath) {
-    const result = await this.containerService.ignoreMember(containerRid, memberPath);
+  async ignoreContainerMember(containerRid, memberPath, options = {}) {
+    const result = await this.containerService.ignoreMember(containerRid, memberPath, options);
     if (this.syncOps) {
       await this.syncOps.recordOp('member_ignored', containerRid, {
         member_path: memberPath
@@ -594,15 +639,149 @@ class Repository {
    * 取消忽略容器成员
    * @param {string} containerRid
    * @param {string} memberPath
+   * @param {number} [sourceId]
    */
-  async unignoreContainerMember(containerRid, memberPath) {
-    const result = await this.containerService.unignoreMember(containerRid, memberPath);
+  async unignoreContainerMember(containerRid, memberPath, options = {}) {
+    const result = await this.containerService.unignoreMember(containerRid, memberPath, options);
     if (this.syncOps) {
       await this.syncOps.recordOp('member_unignored', containerRid, {
         member_path: memberPath
       });
     }
     return result;
+  }
+
+  // ────────── Phase 4.1: Member API ──────────
+
+  /**
+   * 自动事务包装：单个操作自动 begin→execute→commit，失败自动 rollback
+   * @private
+   */
+  async _transactionalOp(containerRid, opType, opParams, options = {}) {
+    if (options.transactionId) {
+      // 在已有事务中执行
+      return this.transactionEngine.execute(options.transactionId, opType, opParams, options);
+    }
+    // 自动事务
+    const tx = await this.transactionEngine.begin({ containerRid, type: opType });
+    try {
+      const result = await this.transactionEngine.execute(tx.transactionId, opType, opParams, options);
+      await this.transactionEngine.commit(tx.transactionId);
+      return result;
+    } catch (err) {
+      await this.transactionEngine.rollback(tx.transactionId);
+      throw err;
+    }
+  }
+
+  /**
+   * 重命名容器成员
+   */
+  async renameContainerMember(containerRid, memberPath, newPath, options = {}) {
+    return this._transactionalOp(containerRid, 'member.rename', {
+      containerRid, memberPath, newPath, sourceId: options.sourceId || null
+    }, options);
+  }
+
+  /**
+   * 软删除容器成员
+   */
+  async removeContainerMember(containerRid, memberPath, options = {}) {
+    return this._transactionalOp(containerRid, 'member.remove', {
+      containerRid, memberPath, sourceId: options.sourceId || null
+    }, options);
+  }
+
+  /**
+   * 恢复已删除的容器成员
+   */
+  async restoreContainerMember(containerRid, memberPath, options = {}) {
+    return this._transactionalOp(containerRid, 'member.restore', {
+      containerRid, memberPath, sourceId: options.sourceId || null
+    }, options);
+  }
+
+  /**
+   * 移动成员到另一个容器
+   */
+  async moveContainerMember(containerRid, memberPath, targetContainerRid, options = {}) {
+    return this._transactionalOp(containerRid, 'member.move', {
+      containerRid, memberPath, targetContainerRid, sourceId: options.sourceId || null
+    }, options);
+  }
+
+  /**
+   * 复制成员到另一个容器
+   */
+  async copyContainerMember(containerRid, memberPath, targetContainerRid, options = {}) {
+    return this._transactionalOp(containerRid, 'member.copy', {
+      containerRid, memberPath, targetContainerRid, sourceId: options.sourceId || null
+    }, options);
+  }
+
+  /**
+   * Phase 4.2: 获取容器的操作历史
+   */
+  async getContainerHistory(containerRid, options = {}) {
+    return this.operationEngine.getHistory(containerRid, options);
+  }
+
+  /**
+   * Phase 4.2: 获取特定成员的操作历史
+   */
+  async getMemberHistory(containerRid, memberPath) {
+    return this.operationEngine.getMemberHistory(containerRid, memberPath);
+  }
+
+  /**
+   * Phase 4.2: 撤销操作
+   */
+  async undoContainerOperation(operationId) {
+    return this.operationEngine.undo(operationId);
+  }
+
+  // ────────── Phase 4.4: Transaction API ──────────
+
+  /**
+   * 开始一个事务（批量操作入口）
+   */
+  async beginTransaction(containerRid, type, description = null) {
+    return this.transactionEngine.begin({ containerRid, type, description });
+  }
+
+  /**
+   * 在事务中执行操作
+   */
+  async executeInTransaction(transactionId, type, params, options = {}) {
+    return this.transactionEngine.execute(transactionId, type, params, options);
+  }
+
+  /**
+   * 提交事务
+   */
+  async commitTransaction(transactionId) {
+    return this.transactionEngine.commit(transactionId);
+  }
+
+  /**
+   * 回滚事务
+   */
+  async rollbackTransaction(transactionId) {
+    return this.transactionEngine.rollback(transactionId);
+  }
+
+  /**
+   * 获取容器的事务列表
+   */
+  async getContainerTransactions(containerRid, options = {}) {
+    return this.transactionEngine.getTransactions(containerRid, options);
+  }
+
+  /**
+   * 获取事务详情
+   */
+  async getTransactionDetail(transactionId) {
+    return this.transactionEngine.getTransaction(transactionId);
   }
 
   /**
@@ -618,13 +797,7 @@ class Repository {
     if (!await this.containerService.hasContainerCapability(containerRid)) {
       throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
     }
-    const sources = await this.sourceService.getLocalFolderSources(containerRid);
-    const results = [];
-    for (const src of sources) {
-      const diff = await this.containerService.diffMembers(containerRid, src.location);
-      results.push({ source: src.location, ...diff });
-    }
-    return results;
+    return this.syncEngine.diff(containerRid);
   }
 
   /**
@@ -642,13 +815,7 @@ class Repository {
     if (!await this.containerService.hasContainerCapability(containerRid)) {
       throw new Error(`Resource ${containerRid} 不具有 Container Capability`);
     }
-    const sources = await this.sourceService.getLocalFolderSources(containerRid);
-    const results = [];
-    for (const src of sources) {
-      const syncResult = await this.containerService.syncMembers(containerRid, src.location);
-      results.push({ source: src.location, ...syncResult });
-    }
-    return results;
+    return this.syncEngine.sync(containerRid);
   }
 
   async getResource(rid) {
@@ -682,6 +849,138 @@ class Repository {
     }
 
     return null;
+  }
+
+  /**
+   * 一致性检查：检查容器 ORPHAN_RESOURCE / ORPHAN_SOURCE / INVALID_STATUS / ORPHAN_OPERATION
+   *
+   * @param {string} containerRid
+   * @returns {Promise<{ issues: Array }>}
+   */
+  async verifyContainer(containerRid) {
+    const issues = [];
+    const MemberStateMachine = require('../domain/memberStateMachine.cjs');
+
+    // 1. Member 检查
+    const members = await this.db.all(
+      'SELECT * FROM container_members WHERE container_rid = ?',
+      [containerRid]
+    );
+
+    for (const m of members) {
+      // 1a. ORPHAN_RESOURCE: promoted 但 resource_rid 不存在
+      if (m.resource_rid) {
+        const res = await this.db.get('SELECT rid FROM resources WHERE rid = ?', [m.resource_rid]);
+        if (!res) {
+          issues.push({
+            level: 'error',
+            category: 'ORPHAN_RESOURCE',
+            message: `member ${m.path} (id=${m.id}) promoted but resource ${m.resource_rid} missing`,
+            member: m.path,
+            detail: { memberId: m.id, resourceRid: m.resource_rid }
+          });
+        }
+      }
+
+      // 1b. ORPHAN_SOURCE: source_id 存在但 resource_sources 不存在
+      if (m.source_id) {
+        const src = await this.db.get('SELECT id FROM resource_sources WHERE id = ?', [m.source_id]);
+        if (!src) {
+          issues.push({
+            level: 'error',
+            category: 'ORPHAN_SOURCE',
+            message: `member ${m.path} (id=${m.id}) references missing source ${m.source_id}`,
+            member: m.path,
+            detail: { memberId: m.id, sourceId: m.source_id }
+          });
+        }
+      }
+
+      // 1c. INVALID_STATUS: 状态值不在合法范围内
+      if (m.status && !MemberStateMachine.isValidStatus(m.status)) {
+        issues.push({
+          level: 'error',
+          category: 'INVALID_STATUS',
+          message: `member ${m.path} (id=${m.id}) has invalid status: ${m.status}`,
+          member: m.path,
+          detail: { memberId: m.id, status: m.status }
+        });
+      }
+    }
+
+    // 2. Operation 检查
+    const ops = await this.db.all(
+      'SELECT * FROM container_operations WHERE container_rid = ?',
+      [containerRid]
+    );
+
+    for (const op of ops) {
+      // 检查 before/after JSON 合法性
+      if (op.before) {
+        try { JSON.parse(op.before); } catch (e) {
+          issues.push({
+            level: 'warn',
+            category: 'CORRUPT_OPERATION',
+            message: `operation ${op.operation_id} has invalid before JSON`,
+            detail: { operationId: op.operation_id }
+          });
+        }
+      }
+      if (op.after) {
+        try { JSON.parse(op.after); } catch (e) {
+          issues.push({
+            level: 'warn',
+            category: 'CORRUPT_OPERATION',
+            message: `operation ${op.operation_id} has invalid after JSON`,
+            detail: { operationId: op.operation_id }
+          });
+        }
+      }
+
+      // 检查 transaction_id 引用
+      if (op.transaction_id) {
+        const tx = await this.db.get(
+          'SELECT transaction_id FROM container_transactions WHERE transaction_id = ?',
+          [op.transaction_id]
+        );
+        if (!tx) {
+          issues.push({
+            level: 'warn',
+            category: 'ORPHAN_OPERATION',
+            message: `operation ${op.operation_id} references missing transaction ${op.transaction_id}`,
+            detail: { operationId: op.operation_id, transactionId: op.transaction_id }
+          });
+        }
+      }
+    }
+
+    // 3. Transaction 检查
+    const txs = await this.db.all(
+      'SELECT * FROM container_transactions WHERE container_rid = ?',
+      [containerRid]
+    );
+
+    for (const tx of txs) {
+      // 检查状态合法性
+      const validTxStatuses = ['active', 'committed', 'rolled_back', 'failed'];
+      if (!validTxStatuses.includes(tx.status)) {
+        issues.push({
+          level: 'error',
+          category: 'INVALID_TX_STATUS',
+          message: `transaction ${tx.transaction_id} has invalid status: ${tx.status}`,
+          detail: { transactionId: tx.transaction_id, status: tx.status }
+        });
+      }
+    }
+
+    return { containerRid, issues, ok: issues.length === 0 };
+  }
+
+  /**
+   * 获取所有已注册的操作类型
+   */
+  getOperationTypes() {
+    return this.operationRegistry.list();
   }
 
   async getResourceByName(name) {
@@ -1209,14 +1508,18 @@ class Repository {
   async _handleFileEvent(event) {
     const { event: eventType, path: filePath } = event;
     
+    // 检查是否属于 Container Source —— 容器内容由 sync engine 管理
+    if (this.containerService) {
+      const inSource = await this.containerService.isInContainerSource(filePath);
+      if (inSource) {
+        // 标记对应容器为 dirty（文件变更，等待 sync）
+        await this._markContainersDirtyForFile(filePath);
+        return;
+      }
+    }
+    
     switch (eventType) {
       case 'add':
-        // 如果文件属于某个 Container Source 目录，跳过 import
-        // 容器内容由 lo container scan 管，不由 FileWatcher 管
-        if (this.containerService) {
-          const inSource = await this.containerService.isInContainerSource(filePath);
-          if (inSource) return;
-        }
         if (ResourceType.isSupported(filePath)) {
           await this.importFile(filePath);
         }
@@ -1235,6 +1538,24 @@ class Repository {
           await this.resourceService.delete(deletedResource.rid, true);
         }
         break;
+    }
+  }
+
+  /**
+   * 找到包含指定文件路径的 Container，标记为 dirty
+   */
+  async _markContainersDirtyForFile(filePath) {
+    try {
+      const normalizedPath = filePath.replace(/\\/g, '/');
+      const sources = await this.sourceService.getEnabledSources();
+      for (const src of sources) {
+        const normalizedSource = src.location.replace(/\\/g, '/');
+        if (normalizedPath.startsWith(normalizedSource + '/') || normalizedPath === normalizedSource) {
+          await this.syncEngine.markDirty(src.resource_rid);
+        }
+      }
+    } catch (e) {
+      // 静默失败，不影响 watcher 主流程
     }
   }
 

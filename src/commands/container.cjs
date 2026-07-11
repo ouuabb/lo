@@ -275,6 +275,315 @@ async function scanHandler(argv) {
 }
 
 // ──────────────────────────────────────
+// lo container sync <rid>
+// ──────────────────────────────────────
+
+/**
+ * 同步容器成员：scan + remove orphaned/deleted members
+ *
+ * 与 scan 的区别：
+ *   - scan 仅添加新文件
+ *   - sync 执行完整的 diff + apply（新增/修改/删除）
+ *
+ * 示例:
+ *   lo container sync res_xxx
+ *   lo container sync my-project
+ *   lo container sync my-project --dry-run   (仅预览，不修改)
+ */
+async function syncHandler(argv) {
+  const identifier = argv.rid || argv._[2];
+  const dryRun = argv['dry-run'] || argv.n || false;
+
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID），例如: lo container sync res_abc123');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const container = await repo.getResource(rid);
+    if (!container) {
+      Logger.error(`容器不存在: ${rid}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    if (dryRun) {
+      // dry-run: 只显示 diff
+      const diffList = await repo.getContainerDiff(rid);
+      console.log(chalk.bold.cyan(`\n  Container: ${container.name} (${container.rid})`));
+      console.log(chalk.gray(`  [dry-run] 预览将要应用的变更`));
+      console.log('');
+
+      for (const diff of diffList) {
+        console.log(chalk.bold(`  Content Source: ${diff.source}`));
+        if (diff._error) {
+          console.log(chalk.red(`    ! ${diff._error}`));
+          continue;
+        }
+        if (diff.added.length > 0) {
+          for (const f of diff.added) console.log(chalk.green(`    + ${f.path}`));
+        }
+        if (diff.modified.length > 0) {
+          for (const f of diff.modified) {
+            const promoted = f.resource_rid ? chalk.magenta(' [已提升]') : '';
+            console.log(chalk.yellow(`    ~ ${f.path}${promoted}`));
+          }
+        }
+        if (diff.deleted.length > 0) {
+          for (const f of diff.deleted) {
+            const promoted = f.resource_rid ? chalk.magenta(' [已提升]') : '';
+            console.log(chalk.red(`    - ${f.path}${promoted}`));
+          }
+        }
+        const total = diff.added.length + diff.modified.length + diff.deleted.length;
+        if (total === 0) {
+          console.log(chalk.gray(`    (无变更, ${diff.unchanged} 未变化)`));
+        }
+      }
+      console.log('');
+    } else {
+      // 执行 sync
+      console.log(chalk.bold.cyan(`\n  Container: ${container.name} (${container.rid})`));
+      const results = await repo.syncContainerMembers(rid);
+
+      let totalAdded = 0, totalUpdated = 0, totalRemoved = 0;
+
+      for (const r of results) {
+        console.log(chalk.gray(`\n  Source: ${r.source}`));
+        if (r.added > 0) console.log(chalk.green(`    +${r.added} 新增`));
+        if (r.updated > 0) console.log(chalk.yellow(`    ~${r.updated} 更新`));
+        if (r.removed > 0) console.log(chalk.red(`    -${r.removed} 移除`));
+        if (r.errors && r.errors.length > 0) {
+          for (const e of r.errors) console.log(chalk.red(`    ! ${e.file}: ${e.error}`));
+        }
+        totalAdded += r.added;
+        totalUpdated += r.updated;
+        totalRemoved += r.removed;
+      }
+
+      console.log(chalk.gray('\n  ' + '─'.repeat(55)));
+      if (totalAdded + totalUpdated + totalRemoved === 0) {
+        Logger.success('  已是最新，无需同步');
+      } else {
+        Logger.success(`  同步完成: ${totalAdded ? '+' + totalAdded : ''}${totalUpdated ? ' ~' + totalUpdated : ''}${totalRemoved ? ' -' + totalRemoved : ''}`);
+      }
+
+      const stats = await repo.getContainerMemberStats(rid);
+      console.log(chalk.gray(`  总计 ${stats.total} 个成员 (${stats.promoted} 已提升, ${stats.indexed} 普通文件, ${stats.deleted} 已删除)`));
+      console.log('');
+    }
+
+    await repo.close();
+    process.exit(0);
+
+  } catch (error) {
+    Logger.error(`sync 失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// lo container members <rid>
+// ──────────────────────────────────────
+
+/**
+ * 列出容器成员（带类型/状态图标）
+ *
+ * 与 list 的区别：
+ *   - list 显示 Resource-level 视图
+ *   - members 显示成员级视图（带索引/提升/忽略/删除 状态）
+ *
+ * 示例:
+ *   lo container members res_xxx
+ *   lo container members my-project --promoted
+ */
+async function membersHandler(argv) {
+  const identifier = argv.rid || argv._[2];
+  const promotedOnly = argv.promoted || false;
+  const indexedOnly = argv.indexed || false;
+
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID），例如: lo container members res_abc123');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const container = await repo.getResource(rid);
+    if (!container) {
+      Logger.error(`容器不存在: ${rid}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    let members = await repo.getContainerMembers(rid);
+
+    // 过滤
+    if (promotedOnly) {
+      members = members.filter(m => m.status === 'promoted');
+    }
+    if (indexedOnly) {
+      members = members.filter(m => m.status === 'indexed');
+    }
+
+    console.log(chalk.bold.cyan(`\n  Container: ${container.name} (${container.rid})`));
+    console.log(chalk.gray(`  ${members.length} 个成员`));
+    console.log('');
+
+    if (members.length === 0) {
+      console.log(chalk.gray('  (空)'));
+    } else {
+      for (const m of members) {
+        let icon, detail;
+        switch (m.status) {
+          case 'promoted':
+            icon = chalk.magenta(' ◆');
+            detail = chalk.magenta(`[${m.resource_rid}]`);
+            break;
+          case 'deleted':
+            icon = chalk.red(' -');
+            detail = chalk.red('(已删除)');
+            break;
+          default: {
+            const isForceIgnored = m.force_ignore === 1;
+            if (isForceIgnored) {
+              icon = chalk.yellow(' F');
+              detail = chalk.yellow('(强制忽略)');
+            } else {
+              icon = chalk.white(' ·');
+              detail = chalk.gray(`${(m.size / 1024).toFixed(1)}K`);
+            }
+            break;
+          }
+        }
+        console.log(`  ${icon} ${m.path}  ${detail}`);
+      }
+    }
+
+    // 图例
+    console.log(chalk.gray('\n  ◆ promoted  · indexed  F force-ignored  - deleted'));
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+
+  } catch (error) {
+    Logger.error(`members 失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// lo container config <rid>
+// ──────────────────────────────────────
+
+/**
+ * 查看容器同步配置
+ *
+ * 示例:
+ *   lo container config res_xxx
+ *   lo container config my-project
+ */
+async function configHandler(argv) {
+  const identifier = argv.rid || argv._[2];
+
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID），例如: lo container config res_abc123');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const container = await repo.getResource(rid);
+    if (!container) {
+      Logger.error(`容器不存在: ${rid}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const sources = await repo.sourceService.getSources(rid);
+
+    console.log(chalk.bold.cyan(`\n  Container: ${container.name} (${container.rid})`));
+    console.log('');
+
+    if (sources.length === 0) {
+      console.log(chalk.gray('  (无 Content Source)'));
+    }
+
+    for (const src of sources) {
+      console.log(chalk.bold(`  Source #${src.id}: ${src.location}`));
+      console.log(chalk.gray(`    type: ${src.source_type}`));
+      console.log(chalk.gray(`    enabled: ${src.enabled !== 0 ? '是' : '否'}`));
+
+      // 从 syncConfigService 获取同步配置
+      const config = await repo.syncConfigService.getConfig(rid, src.id);
+      if (config) {
+        console.log(chalk.gray(`    sync_mode: ${config.sync_mode || 'manual'}`));
+        console.log(chalk.gray(`    delete_policy: ${config.delete_policy || 'soft'}`));
+        console.log(chalk.gray(`    conflict_policy: ${config.conflict_policy || 'local'}`));
+        if (config.interval_ms) {
+          console.log(chalk.gray(`    interval: ${config.interval_ms}ms`));
+        }
+      } else {
+        console.log(chalk.gray(`    sync_mode: manual (默认)`));
+      }
+
+      if (src.last_scan_at) {
+        const ago = Math.round((Date.now() - src.last_scan_at) / 1000);
+        const agoStr = ago < 60 ? `${ago}s` : ago < 3600 ? `${Math.round(ago / 60)}min` : `${Math.round(ago / 3600)}h`;
+        console.log(chalk.gray(`    last_scan: ${new Date(src.last_scan_at).toISOString()} (${agoStr}前)`));
+      }
+
+      console.log('');
+    }
+
+    await repo.close();
+    process.exit(0);
+
+  } catch (error) {
+    Logger.error(`config 失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
 // lo container list <rid>
 // ──────────────────────────────────────
 
@@ -393,8 +702,9 @@ async function ignoreHandler(argv) {
       return;
     }
 
-    const result = await repo.ignoreContainerMember(resolved.container.rid, resolved.relPath);
+    const result = await repo.ignoreContainerMember(resolved.container.rid, resolved.relPath, { sourceId: argv.source || null });
     Logger.success(`已忽略: ${memberPath}`);
+    if (argv.source) Logger.info(`  Source: ${argv.source}`);
     Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
     Logger.info('  提示: 使用 lo container unignore <path> 取消忽略');
 
@@ -442,8 +752,9 @@ async function unignoreHandler(argv) {
       return;
     }
 
-    const result = await repo.unignoreContainerMember(resolved.container.rid, resolved.relPath);
+    const result = await repo.unignoreContainerMember(resolved.container.rid, resolved.relPath, { sourceId: argv.source || null });
     Logger.success(`已取消忽略: ${memberPath}`);
+    if (argv.source) Logger.info(`  Source: ${argv.source}`);
     Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
 
     await repo.close();
@@ -451,6 +762,517 @@ async function unignoreHandler(argv) {
 
   } catch (error) {
     Logger.error(`unignore 失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// Phase 4.1: lo container member <action>
+// ──────────────────────────────────────
+
+async function memberRenameHandler(argv) {
+  const memberPath = argv.path || argv._[3];
+  const newPath = argv.newpath || argv._[4];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath || !newPath) {
+    Logger.error('请指定路径和新名称: lo container member rename <path> <newpath>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, path.resolve(process.cwd(), memberPath));
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const result = await repo.renameContainerMember(resolved.container.rid, resolved.relPath, newPath);
+    Logger.success(`已重命名: ${memberPath} → ${newPath}`);
+    Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`重命名失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function memberRemoveHandler(argv) {
+  const memberPath = argv.path || argv._[3];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath) {
+    Logger.error('请指定成员路径: lo container member remove <path>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, path.resolve(process.cwd(), memberPath));
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const result = await repo.removeContainerMember(resolved.container.rid, resolved.relPath);
+    Logger.success(`已删除: ${memberPath}`);
+    Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
+    Logger.info('  提示: 使用 lo container member restore <path> 恢复');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`删除失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function memberRestoreHandler(argv) {
+  const memberPath = argv.path || argv._[3];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath) {
+    Logger.error('请指定成员路径: lo container member restore <path>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, path.resolve(process.cwd(), memberPath));
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const result = await repo.restoreContainerMember(resolved.container.rid, resolved.relPath);
+    Logger.success(`已恢复: ${memberPath} (状态: ${result.status})`);
+    Logger.info(`  Container: ${resolved.container.name} (${resolved.container.rid})`);
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`恢复失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function memberMoveHandler(argv) {
+  const memberPath = argv.path || argv._[3];
+  const targetContainer = argv.target || argv._[4];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath || !targetContainer) {
+    Logger.error('请指定路径和目标容器: lo container member move <path> <target_container>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, path.resolve(process.cwd(), memberPath));
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const targetRid = await repo.resolveContainer(targetContainer);
+    if (!targetRid) {
+      Logger.error(`目标容器不存在或不是 Container: ${targetContainer}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const result = await repo.moveContainerMember(resolved.container.rid, resolved.relPath, targetRid);
+    Logger.success(`已移动: ${memberPath}`);
+    Logger.info(`  From: ${resolved.container.name} (${resolved.container.rid})`);
+    Logger.info(`  To:   ${targetContainer} (${targetRid})`);
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`移动失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function memberCopyHandler(argv) {
+  const memberPath = argv.path || argv._[3];
+  const targetContainer = argv.target || argv._[4];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath || !targetContainer) {
+    Logger.error('请指定路径和目标容器: lo container member copy <path> <target_container>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, path.resolve(process.cwd(), memberPath));
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const targetRid = await repo.resolveContainer(targetContainer);
+    if (!targetRid) {
+      Logger.error(`目标容器不存在或不是 Container: ${targetContainer}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const result = await repo.copyContainerMember(resolved.container.rid, resolved.relPath, targetRid);
+    Logger.success(`已复制: ${memberPath}`);
+    Logger.info(`  From: ${resolved.container.name} (${resolved.container.rid})`);
+    Logger.info(`  To:   ${targetContainer} (${targetRid})`);
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`复制失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// Phase 4.2: lo container member history / lo container undo
+// ──────────────────────────────────────
+
+async function containerHistoryHandler(argv) {
+  const containerIdentifier = argv.container || argv.c || null;
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, null);
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const history = await repo.getContainerHistory(resolved.container.rid, { limit: argv.limit || 50 });
+
+    if (history.length === 0) {
+      Logger.info(chalk.gray('  无操作历史'));
+    } else {
+      Logger.info(chalk.bold(`\n  容器: ${resolved.container.name}  (${resolved.container.rid})`));
+      Logger.info('  ' + chalk.gray('─'.repeat(70)));
+      for (const op of history) {
+        const time = new Date(op.created).toLocaleString('zh-CN');
+        const statusIcon = op.status === 'success' ? chalk.green('✓')
+          : op.status === 'failed' ? chalk.red('✗')
+          : op.status === 'rolled_back' ? chalk.yellow('↺')
+          : chalk.gray('○');
+        Logger.info(`  ${statusIcon} ${chalk.gray(time)}  ${chalk.cyan(op.type)}  [${op.status}]`);
+        if (op.member_path) Logger.info(`    ${chalk.gray('path:')} ${op.member_path}`);
+        if (op.parent_operation_id) Logger.info(`    ${chalk.gray('parent:')} ${op.parent_operation_id}`);
+        if (op.error) Logger.info(`    ${chalk.red('error:')} ${op.error}`);
+      }
+      Logger.info('  ' + chalk.gray('─'.repeat(70)));
+      Logger.info(`  ${chalk.gray('共')} ${history.length} ${chalk.gray('条记录')}`);
+    }
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`查询历史失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function memberHistoryHandler(argv) {
+  const memberPath = argv.path || argv._[3];
+  const containerIdentifier = argv.container || argv.c || null;
+
+  if (!memberPath) {
+    Logger.error('请指定成员路径: lo container member history <path>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    const resolved = await _resolveContainerAndPath(repo, containerIdentifier, path.resolve(process.cwd(), memberPath));
+    if (!resolved) { await repo.close(); process.exit(1); return; }
+
+    const history = await repo.getMemberHistory(resolved.container.rid, resolved.relPath);
+
+    if (history.length === 0) {
+      Logger.info(chalk.gray(`  无操作历史: ${memberPath}`));
+    } else {
+      Logger.info(chalk.bold(`\n  成员: ${memberPath}  容器: ${resolved.container.name}`));
+      Logger.info('  ' + chalk.gray('─'.repeat(60)));
+      for (const op of history) {
+        const time = new Date(op.created).toLocaleString('zh-CN');
+        const statusIcon = op.status === 'success' ? chalk.green('✓')
+          : op.status === 'rolled_back' ? chalk.yellow('↺')
+          : chalk.gray('○');
+        const displayType = op.type.startsWith('undo.') ? chalk.yellow(op.type) : chalk.cyan(op.type);
+        Logger.info(`  ${statusIcon} ${chalk.gray(time)}  ${displayType}  [${op.status}]`);
+        if (op.before) {
+          Logger.info(`    ${chalk.gray('before:')} ${JSON.stringify(op.before)}`);
+        }
+        if (op.after) {
+          Logger.info(`    ${chalk.gray('after:')}  ${JSON.stringify(op.after)}`);
+        }
+      }
+      Logger.info('  ' + chalk.gray('─'.repeat(60)));
+    }
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`查询历史失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function undoHandler(argv) {
+  const operationId = argv.operation || argv._[3];
+
+  if (!operationId) {
+    Logger.error('请指定操作 ID: lo container undo <operation_id>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.undoContainerOperation(operationId);
+    Logger.success(`撤销成功`);
+    Logger.info(`  原操作: ${operationId}`);
+    Logger.info(`  撤销操作 ID: ${result.undoOperationId}`);
+    if (result.result) {
+      Logger.info(`  结果: ${JSON.stringify(result.result)}`);
+    }
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`撤销失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// Phase 4.4: lo container transaction <action>
+// ──────────────────────────────────────
+
+async function transactionListHandler(argv) {
+  const containerIdentifier = argv.container || argv.c || argv._[3];
+
+  if (!containerIdentifier) {
+    Logger.error('请指定容器（名称或 RID）: lo container transaction list <container>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(containerIdentifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${containerIdentifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const container = await repo.getResource(rid);
+    const transactions = await repo.getContainerTransactions(rid, { limit: argv.limit || 50 });
+
+    console.log(chalk.bold.cyan(`\n  Container: ${container.name} (${container.rid})`));
+    console.log(chalk.gray(`  ${transactions.length} 个事务`));
+    console.log('');
+
+    if (transactions.length === 0) {
+      console.log(chalk.gray('  (无事务记录)'));
+    } else {
+      console.log(chalk.gray('  ' + '─'.repeat(70)));
+
+      // 收集操作计数
+      for (const tx of transactions) {
+        const ops = await repo.transactionEngine.operationEngine.getOperationsByTransaction(tx.transaction_id);
+        const statusIcon = tx.status === 'committed' ? chalk.green('✓')
+          : tx.status === 'rolled_back' ? chalk.yellow('↺')
+          : tx.status === 'active' ? chalk.cyan('▶')
+          : tx.status === 'failed' ? chalk.red('✗')
+          : chalk.gray('○');
+        const time = tx.created ? new Date(tx.created).toLocaleString('zh-CN') : '-';
+        const desc = tx.description ? chalk.gray(`  "${tx.description}"`) : '';
+        console.log(`  ${statusIcon} ${chalk.bold(tx.transaction_id)}  ${chalk.cyan(tx.type)}  [${tx.status}]  ${ops.length} ops`);
+        console.log(`    ${chalk.gray(time)}${desc}`);
+      }
+      console.log(chalk.gray('  ' + '─'.repeat(70)));
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`查询事务失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function transactionShowHandler(argv) {
+  const transactionId = argv.transaction || argv._[3];
+
+  if (!transactionId) {
+    Logger.error('请指定事务 ID: lo container transaction show <tx_id>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const tx = await repo.getTransactionDetail(transactionId);
+    if (!tx) {
+      Logger.error(`事务不存在: ${transactionId}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const statusIcon = tx.status === 'committed' ? chalk.green('✓ committed')
+      : tx.status === 'rolled_back' ? chalk.yellow('↺ rolled_back')
+      : tx.status === 'active' ? chalk.cyan('▶ active')
+      : tx.status === 'failed' ? chalk.red('✗ failed')
+      : chalk.gray(`○ ${tx.status}`);
+
+    console.log(chalk.bold.cyan(`\n  Transaction: ${tx.transaction_id}`));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+    console.log(`  Type:       ${chalk.cyan(tx.type)}`);
+    console.log(`  Status:     ${statusIcon}`);
+    console.log(`  Container:  ${tx.container_rid}`);
+    if (tx.description) console.log(`  Desc:       ${tx.description}`);
+    if (tx.created) console.log(`  Created:    ${new Date(tx.created).toLocaleString('zh-CN')}`);
+    if (tx.completed) console.log(`  Completed:  ${new Date(tx.completed).toLocaleString('zh-CN')}`);
+    if (tx.error) console.log(`  Error:      ${chalk.red(tx.error)}`);
+
+    console.log(chalk.gray('\n  Operations:'));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+
+    const ops = tx.operations || [];
+    if (ops.length === 0) {
+      console.log(chalk.gray('    (无操作)'));
+    } else {
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const statusIcon = op.status === 'success' ? chalk.green('✓')
+          : op.status === 'failed' ? chalk.red('✗')
+          : op.status === 'rolled_back' ? chalk.yellow('↺')
+          : chalk.gray('○');
+        const time = op.created ? new Date(op.created).toLocaleString('zh-CN') : '-';
+        console.log(`  ${chalk.gray((i + 1).toString().padStart(2))} ${statusIcon} ${chalk.cyan(op.type)}  ${chalk.gray(time)}`);
+        if (op.before) {
+          const before = typeof op.before === 'string' ? JSON.parse(op.before) : op.before;
+          console.log(`     ${chalk.gray('before:')} ${JSON.stringify(before)}`);
+        }
+        if (op.after) {
+          const after = typeof op.after === 'string' ? JSON.parse(op.after) : op.after;
+          console.log(`     ${chalk.gray('after:')}  ${JSON.stringify(after)}`);
+        }
+        if (op.error) console.log(`     ${chalk.red('error:')} ${op.error}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`查询事务详情失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function transactionUndoHandler(argv) {
+  const transactionId = argv.transaction || argv._[3];
+
+  if (!transactionId) {
+    Logger.error('请指定事务 ID: lo container transaction undo <tx_id>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.rollbackTransaction(transactionId);
+    Logger.success(`事务已回滚: ${transactionId}`);
+    Logger.info(`  撤销了 ${result.undos} 个操作`);
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`回滚事务失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ──────────────────────────────────────
+// Phase 4.5: lo container verify <rid>
+// ──────────────────────────────────────
+
+async function verifyHandler(argv) {
+  const identifier = argv.rid || argv._[2];
+
+  if (!identifier) {
+    Logger.error('请指定容器（名称或 RID）: lo container verify <container>');
+    process.exit(1);
+    return;
+  }
+
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const rid = await repo.resolveContainer(identifier);
+    if (!rid) {
+      Logger.error(`容器不存在或不是 Container: ${identifier}`);
+      await repo.close();
+      process.exit(1);
+      return;
+    }
+
+    const container = await repo.getResource(rid);
+    const result = await repo.verifyContainer(rid);
+
+    console.log(chalk.bold.cyan(`\n  Container Verify: ${container.name} (${container.rid})`));
+    console.log(chalk.gray('  ' + '─'.repeat(55)));
+
+    if (result.ok) {
+      console.log(chalk.green(`\n  ✓  No corruption found`));
+    }
+
+    const checks = {
+      ORPHAN_RESOURCE: { passed: true },
+      ORPHAN_SOURCE: { passed: true },
+      INVALID_STATUS: { passed: true },
+      CORRUPT_OPERATION: { passed: true },
+      ORPHAN_OPERATION: { passed: true },
+      INVALID_TX_STATUS: { passed: true }
+    };
+
+    for (const issue of result.issues) {
+      const check = checks[issue.category];
+      if (check) check.passed = false;
+    }
+
+    for (const [category, state] of Object.entries(checks)) {
+      const icon = state.passed ? chalk.green('  ✓') : chalk.red('  ✗');
+      console.log(`${icon} ${chalk.gray(category)}`);
+    }
+
+    if (!result.ok) {
+      console.log(chalk.yellow(`\n  ${result.issues.length} issue(s) found:`));
+      for (const issue of result.issues) {
+        const prefix = issue.level === 'error' ? chalk.red('  [ERROR]')
+          : chalk.yellow('  [WARN]');
+        console.log(`${prefix} ${issue.message}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`verify 失败: ${error.message}`);
     process.exit(1);
   }
 }
@@ -516,7 +1338,22 @@ module.exports = {
   promote: promoteHandler,
   status: statusHandler,
   scan: scanHandler,
+  sync: syncHandler,
   list: listHandler,
+  members: membersHandler,
+  config: configHandler,
   ignore: ignoreHandler,
-  unignore: unignoreHandler
+  unignore: unignoreHandler,
+  memberRename: memberRenameHandler,
+  memberRemove: memberRemoveHandler,
+  memberRestore: memberRestoreHandler,
+  memberMove: memberMoveHandler,
+  memberCopy: memberCopyHandler,
+  memberHistory: memberHistoryHandler,
+  containerHistory: containerHistoryHandler,
+  undo: undoHandler,
+  transactionList: transactionListHandler,
+  transactionShow: transactionShowHandler,
+  transactionUndo: transactionUndoHandler,
+  verify: verifyHandler
 };

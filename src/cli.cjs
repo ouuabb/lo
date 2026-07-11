@@ -496,7 +496,7 @@ cli
       .demandCommand(1, '请指定 create 的子命令');
   })
 
-  .command('container', '容器管理（提升/降级、状态、扫描、列表、忽略）', (yargs) => {
+  .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {
         yargs
@@ -530,13 +530,27 @@ cli
           });
       }, containerCmd.status)
 
-      .command('scan [containerId]', '同步容器成员（将文件系统变化应用到数据库）', (yargs) => {
+      .command('scan [containerId]', '扫描容器成员（添加新文件）', (yargs) => {
         yargs
           .positional('containerId', {
             type: 'string',
             description: '容器名称或 RID'
           });
       }, containerCmd.scan)
+
+      .command('sync [containerId]', '同步容器成员（diff + 应用变更：新增/修改/删除）', (yargs) => {
+        yargs
+          .positional('containerId', {
+            type: 'string',
+            description: '容器名称或 RID'
+          })
+          .option('dry-run', {
+            type: 'boolean',
+            alias: 'n',
+            description: '仅预览变更，不实际修改数据库',
+            default: false
+          });
+      }, containerCmd.sync)
 
       .command('list [containerId]', '列出容器所有成员', (yargs) => {
         yargs
@@ -556,7 +570,33 @@ cli
           });
       }, containerCmd.list)
 
-      .command('ignore [path]', '忽略容器成员（从索引中排除）', (yargs) => {
+      .command('members [containerId]', '列出容器成员（带状态图标：promoted/indexed/force-ignored/deleted）', (yargs) => {
+        yargs
+          .positional('containerId', {
+            type: 'string',
+            description: '容器名称或 RID'
+          })
+          .option('promoted', {
+            type: 'boolean',
+            description: '仅显示已提升成员',
+            default: false
+          })
+          .option('indexed', {
+            type: 'boolean',
+            description: '仅显示未提升的普通成员',
+            default: false
+          });
+      }, containerCmd.members)
+
+      .command('config [containerId]', '查看容器同步配置（source / sync_mode / delete_policy）', (yargs) => {
+        yargs
+          .positional('containerId', {
+            type: 'string',
+            description: '容器名称或 RID'
+          });
+      }, containerCmd.config)
+
+      .command('ignore [path]', '强制忽略容器成员（设置 force_ignore 标志）', (yargs) => {
         yargs
           .positional('path', {
             type: 'string',
@@ -566,6 +606,11 @@ cli
             type: 'string',
             alias: 'c',
             description: '容器名称或 RID（不指定则自动查找）'
+          })
+          .option('source', {
+            type: 'number',
+            alias: 's',
+            description: 'Content Source ID（多 source 时指定）'
           });
       }, containerCmd.ignore)
 
@@ -579,10 +624,92 @@ cli
             type: 'string',
             alias: 'c',
             description: '容器名称或 RID（不指定则自动查找）'
+          })
+          .option('source', {
+            type: 'number',
+            alias: 's',
+            description: 'Content Source ID（多 source 时指定）'
           });
       }, containerCmd.unignore)
 
-      .demandCommand(1, '请指定容器子命令。可用: promote, status, scan, list, ignore, unignore');
+      // ── Phase 4.1: lo container member <action> ──
+      .command('member', '成员操作（rename/remove/restore/move/copy）', (yargs) => {
+        yargs
+          .command('rename <path> <newpath>', '重命名成员路径', (yargs) => {
+            yargs
+              .positional('path', { type: 'string', description: '当前成员路径' })
+              .positional('newpath', { type: 'string', description: '新路径' })
+              .option('container', { type: 'string', alias: 'c', description: '容器名称或 RID' });
+          }, containerCmd.memberRename)
+
+          .command('remove <path>', '软删除成员（status→deleted）', (yargs) => {
+            yargs
+              .positional('path', { type: 'string', description: '成员路径' })
+              .option('container', { type: 'string', alias: 'c', description: '容器名称或 RID' });
+          }, containerCmd.memberRemove)
+
+          .command('restore <path>', '恢复已删除的成员', (yargs) => {
+            yargs
+              .positional('path', { type: 'string', description: '成员路径' })
+              .option('container', { type: 'string', alias: 'c', description: '容器名称或 RID' });
+          }, containerCmd.memberRestore)
+
+          .command('move <path> <target>', '移动成员到另一个容器', (yargs) => {
+            yargs
+              .positional('path', { type: 'string', description: '成员路径' })
+              .positional('target', { type: 'string', description: '目标容器名称或 RID' })
+              .option('container', { type: 'string', alias: 'c', description: '源容器名称或 RID' });
+          }, containerCmd.memberMove)
+
+          .command('copy <path> <target>', '复制成员到另一个容器', (yargs) => {
+            yargs
+              .positional('path', { type: 'string', description: '成员路径' })
+              .positional('target', { type: 'string', description: '目标容器名称或 RID' })
+              .option('container', { type: 'string', alias: 'c', description: '源容器名称或 RID' });
+          }, containerCmd.memberCopy)
+
+          .command('history <path>', '查看成员操作历史', (yargs) => {
+            yargs
+              .positional('path', { type: 'string', description: '成员路径' })
+              .option('container', { type: 'string', alias: 'c', description: '容器名称或 RID' });
+          }, containerCmd.memberHistory)
+
+          .demandCommand(1, '请指定成员操作。可用: rename, remove, restore, move, copy, history');
+      })
+
+      .command('history', '查看容器操作时间线', (yargs) => {
+        yargs
+          .option('container', { type: 'string', alias: 'c', description: '容器名称或 RID' })
+          .option('limit', { type: 'number', default: 50, description: '显示条数' });
+      }, containerCmd.containerHistory)
+
+      .command('transaction', '事务管理（list/show/undo）', (yargs) => {
+        yargs
+          .command('list <container>', '列出容器的事务', (yargs) => {
+            yargs
+              .positional('container', { type: 'string', description: '容器名称或 RID' })
+              .option('limit', { type: 'number', default: 50, description: '显示条数' });
+          }, containerCmd.transactionList)
+
+          .command('show <transaction>', '查看事务详情', (yargs) => {
+            yargs
+              .positional('transaction', { type: 'string', description: '事务 ID (tx_xxx)' });
+          }, containerCmd.transactionShow)
+
+          .command('undo <transaction>', '回滚事务（逆序撤销所有操作）', (yargs) => {
+            yargs
+              .positional('transaction', { type: 'string', description: '事务 ID (tx_xxx)' });
+          }, containerCmd.transactionUndo)
+
+          .demandCommand(1, '请指定事务操作。可用: list, show, undo');
+      })
+
+      .command('verify <container>', '检查容器数据一致性（Member/Operation/Transaction）', (yargs) => {
+        yargs
+          .positional('container', { type: 'string', description: '容器名称或 RID' });
+      }, containerCmd.verify)
+
+      .demandCommand(1, '请指定容器子命令。可用: promote, status, scan, sync, list, members, config, ignore, unignore, member, history, transaction, verify');
   })
 
   .command('commit', '提交暂存区到仓库', (yargs) => {
@@ -597,6 +724,15 @@ cli
         description: '标记为合并提交（自动检测，也可手动指定）'
       });
   }, commit)
+
+  // Phase 4.2: undo container operation
+  .command('undo <operation>', '撤销容器操作', (yargs) => {
+    yargs
+      .positional('operation', {
+        type: 'string',
+        description: '操作 ID（通过 lo container member history 查看）'
+      });
+  }, containerCmd.undo)
 
   .command('reset [path]', '取消暂存或清空暂存区', (yargs) => {
     yargs
@@ -676,7 +812,26 @@ cli
         description: '仓库路径',
         default: process.cwd()
       });
-  }, serve);
+  }, serve)
+
+  .command('operation', '操作管理', (yargs) => {
+    yargs
+      .command('types', '列出所有已注册的操作类型', {}, async (argv) => {
+        const Repository = require('./repo/repository.cjs');
+        const repo = new Repository(process.cwd());
+        await repo.open({ skipAuth: true });
+        const types = repo.getOperationTypes();
+        console.log(chalk.bold.cyan('\n  Registered Operations:\n'));
+        for (const t of types) {
+          console.log(`  ${chalk.gray('·')} ${chalk.cyan(t)}`);
+        }
+        console.log(chalk.gray(`\n  ${types.length} types total`));
+        console.log('');
+        await repo.close();
+        process.exit(0);
+      })
+      .demandCommand(1, '请指定操作子命令。可用: types');
+  });
 
 cli.fail((msg, err, yargs) => {
   if (err) {
