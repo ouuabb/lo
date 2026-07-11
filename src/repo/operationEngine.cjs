@@ -2,16 +2,23 @@
  * OperationEngine - 操作引擎
  *
  * 统一入口：所有 Container Member 变更都通过 OperationEngine.execute() 执行。
+ * Phase 5.2: 扩展支持 Relation 操作（relationService 注入）。
+ *
  * 职责：
  *   1. 通过 Registry 查找 handler
  *   2. 管理操作状态生命周期（pending → success | failed | rollback）
  *   3. 持久化操作记录到 container_operations
  *   4. 支持 undo（产生父子操作链）
  *
- * Phase 4.3
+ * Phase 4.3 / 5.2
  */
 
 const crypto = require('crypto');
+
+/**
+ * 用于非容器操作（如 relation）的系统 container_rid
+ */
+const SYSTEM_CONTAINER_RID = '__system__';
 
 class OperationEngine {
   /**
@@ -23,6 +30,15 @@ class OperationEngine {
     this.db = db;
     this.registry = registry;
     this.containerService = containerService;
+    this._services = { containerService };
+  }
+
+  /**
+   * 注入额外服务（供 handler 使用）
+   * Phase 5.2
+   */
+  setService(name, service) {
+    this._services[name] = service;
   }
 
   _genOpId() {
@@ -30,11 +46,19 @@ class OperationEngine {
   }
 
   /**
+   * 构建 handler context
+   * @private
+   */
+  _ctx() {
+    return { db: this.db, ...this._services };
+  }
+
+  /**
    * 执行一个操作
    *
-   * @param {string} type - 操作类型，如 'member.rename'
-   * @param {object} params - handler 所需参数（containerRid, memberPath, 等）
-   * @param {{ actor?: string, parentOperationId?: string }} options
+   * @param {string} type - 操作类型，如 'member.rename'、'relation.create'
+   * @param {object} params - handler 所需参数
+   * @param {{ actor?: string, parentOperationId?: string, transactionId?: string }} options
    * @returns {Promise<{ operationId: string, result: object }>}
    */
   async execute(type, params, options = {}) {
@@ -42,23 +66,26 @@ class OperationEngine {
 
     const handler = this.registry.get(type);
     const operationId = this._genOpId();
-    const containerRid = params.containerRid || params.container_rid;
+    const containerRid = params.containerRid || params.container_rid || SYSTEM_CONTAINER_RID;
     const memberPath = params.memberPath || params.path || null;
     const now = Date.now();
 
-    // 1. 写入 pending 状态
+    // 写入 before 快照（params 本身）
+    const beforeSnapshot = JSON.stringify(params);
+
+    // 写入 pending 状态
     await this.db.run(
-      `INSERT INTO container_operations (operation_id, container_rid, type, member_path, source_id, status, parent_operation_id, transaction_id, actor, created)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
-      [operationId, containerRid, type, memberPath, params.sourceId || null, parentOperationId, transactionId, actor, now]
+      `INSERT INTO container_operations (operation_id, container_rid, type, member_path, source_id, status, parent_operation_id, transaction_id, actor, before, created)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      [operationId, containerRid, type, memberPath, params.sourceId || null, parentOperationId, transactionId, actor, beforeSnapshot, now]
     );
 
-    // 2. 执行
+    // 执行
     try {
-      const ctx = { db: this.db, containerService: this.containerService };
+      const ctx = this._ctx();
       const result = await handler.execute(ctx, params);
 
-      // 3. 成功 → 写入 after 快照
+      // 成功 → 写入 after 快照
       await this.db.run(
         `UPDATE container_operations SET status = 'success', after = ? WHERE operation_id = ?`,
         [JSON.stringify(result), operationId]
@@ -66,7 +93,7 @@ class OperationEngine {
 
       return { operationId, result };
     } catch (err) {
-      // 4. 失败 → 记录错误
+      // 失败 → 记录错误
       await this.db.run(
         `UPDATE container_operations SET status = 'failed', error = ? WHERE operation_id = ?`,
         [err.message, operationId]
@@ -78,12 +105,11 @@ class OperationEngine {
   /**
    * 撤销一个操作
    *
-   * 产生新的操作记录（parent_operation_id 指向被撤销的操作），
-   * 不删除原有历史。
+   * Phase 5.2: undo params 包含完整 operation 记录，
+   * 使 relation handler 也可正确执行 undo。
    *
    * @param {string} operationId - 要撤销的操作 ID
    * @param {{ actor?: string }} options
-   * @returns {Promise<{ undoOperationId: string, result: object }>}
    */
   async undo(operationId, options = {}) {
     const { actor = null } = options;
@@ -108,11 +134,13 @@ class OperationEngine {
 
     const handler = this.registry.get(op.type);
     const after = op.after || {};
+
     const undoParams = {
       containerRid: op.container_rid,
       memberPath: op.member_path,
       sourceId: op.source_id,
-      operationResult: after  // 正向操作的结果，undo 时需要用它来反推
+      operationResult: after,       // 正向操作的结果
+      operation: op                 // Phase 5.2: 完整操作记录（relation handler 需要）
     };
 
     // 创建 undo 操作记录
@@ -127,7 +155,7 @@ class OperationEngine {
     );
 
     try {
-      const ctx = { db: this.db, containerService: this.containerService };
+      const ctx = this._ctx();
       const result = await handler.undo(ctx, undoParams);
 
       // 标记 undo 成功 + 原操作标记为 rolled_back
@@ -152,6 +180,7 @@ class OperationEngine {
 
   /**
    * 获取操作历史
+   * Phase 5.2: 支持 relation 操作（container_rid = '__system__'）
    */
   async getHistory(containerRid, options = {}) {
     const { limit = 50, type = null } = options;
@@ -174,6 +203,13 @@ class OperationEngine {
       before: r.before ? JSON.parse(r.before) : null,
       after: r.after ? JSON.parse(r.after) : null
     }));
+  }
+
+  /**
+   * Phase 5.2: 获取系统操作历史（relation 等非容器操作）
+   */
+  async getSystemHistory(options = {}) {
+    return this.getHistory(SYSTEM_CONTAINER_RID, options);
   }
 
   /**
@@ -247,32 +283,27 @@ class OperationEngine {
     if (!parent) throw new Error('找不到被撤销的原始操作');
 
     const type = parent.type;
-    const result = undoOp.before || {};  // undo's before = parent's after
 
-    // 从 operation result 重建 execute 参数
-    const handler = this.registry.get(type);
-    const params = { containerRid: parent.container_rid, sourceId: parent.source_id, memberPath: parent.member_path };
+    // Phase 5.2: 从 before 快照重建原始参数（通用方案，支持所有操作类型）
+    const params = parent.before || {};
 
-    if (type === 'member.rename') {
-      params.memberPath = result.oldPath;
-      params.newPath = result.newPath;
-    } else if (type === 'member.move') {
-      params.targetContainerRid = result.to;
-    } else if (type === 'member.copy') {
-      params.targetContainerRid = result.to;
-    }
+    // 兼容 Phase 4.3 成员操作的字段名映射
+    params.containerRid = params.containerRid || parent.container_rid;
+    params.sourceId = params.sourceId || parent.source_id;
+    params.memberPath = params.memberPath || parent.member_path;
 
-    // 创建 redo 操作记录
+    // 重新创建 redo 操作记录
     const redoOpId = this._genOpId();
     await this.db.run(
       `INSERT INTO container_operations (operation_id, container_rid, type, member_path, source_id, status, parent_operation_id, actor, before, created)
        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
       [redoOpId, parent.container_rid, type, parent.member_path, parent.source_id,
-       undoOp.operation_id, actor, JSON.stringify(result), Date.now()]
+       undoOp.operation_id, actor, JSON.stringify(params), Date.now()]
     );
 
     try {
-      const ctx = { db: this.db, containerService: this.containerService };
+      const ctx = this._ctx();
+      const handler = this.registry.get(type);
       const redoResult = await handler.execute(ctx, params);
 
       await this.db.run(

@@ -18,6 +18,8 @@ const find = require('./commands/find.cjs');
 const stats = require('./commands/stats.cjs');
 const link = require('./commands/link.cjs');
 const unlink = require('./commands/unlink.cjs');
+const relationCmd = require('./commands/relation.cjs');
+const graphCmd = require('./commands/graph.cjs');
 const move = require('./commands/move.cjs');
 const backup = require('./commands/backup.cjs');
 const daily = require('./commands/daily.cjs');
@@ -38,7 +40,7 @@ const serve = require('./commands/serve.cjs');
 const diff = require('./commands/diff.cjs');
 const stack = require('./commands/stack.cjs');
 const rm = require('./commands/rm.cjs');
-const resource = require('./commands/resource.cjs');
+const createResourceCmd = require('./commands/resource.cjs');
 const containerCmd = require('./commands/container.cjs');
 
 const cli = yargs
@@ -307,6 +309,119 @@ cli
       });
   }, unlink)
 
+  .command('relation', '资源关系管理（Phase 5.1）', (yargs) => {
+    yargs
+      .command('add <from> <to>', '创建关系', (yargs) => {
+        yargs
+          .positional('from', { type: 'string', description: '源资源（名称或 RID）' })
+          .positional('to', { type: 'string', description: '目标资源（名称或 RID）' })
+          .option('type', { type: 'string', default: 'reference', description: '关系类型' })
+          .option('label', { type: 'string', description: '关系标签' });
+      }, relationCmd.add)
+
+      .command('remove <id>', '删除关系（软删除）', (yargs) => {
+        yargs
+          .positional('id', { type: 'number', description: '关系 id' });
+      }, relationCmd.remove)
+
+      .command('list', '列出关系', (yargs) => {
+        yargs
+          .option('resource', { type: 'string', alias: 'r', description: '按资源筛选' })
+          .option('type', { type: 'string', description: '按类型筛选' });
+      }, relationCmd.list)
+
+      .command('show <id>', '查看关系详情', (yargs) => {
+        yargs
+          .positional('id', { type: 'number', description: '关系 id' });
+      }, relationCmd.show)
+
+      .demandCommand(1, '请指定关系子命令。可用: add, remove, list, show');
+  })
+
+  .command('graph', '资源关系图查询（Phase 5.3）', (yargs) => {
+    yargs
+      .command('neighbors <resource>', '查询资源的邻居节点', (yargs) => {
+        yargs.positional('resource', { type: 'string', description: '资源名称或 RID' });
+      }, graphCmd.neighbors)
+
+      .command('backlinks <resource>', '谁引用了这个资源', (yargs) => {
+        yargs.positional('resource', { type: 'string', description: '资源名称或 RID' });
+      }, graphCmd.backlinks)
+
+      .command('path <from> <to>', '最短路径查询', (yargs) => {
+        yargs
+          .positional('from', { type: 'string', description: '起始资源' })
+          .positional('to', { type: 'string', description: '目标资源' });
+      }, graphCmd.path)
+
+      .command('cycles', '检测图中的环', () => {}, graphCmd.cycles)
+
+      .command('export', '导出图（支持 html/svg/json/dot/mermaid/adjacency）', (yargs) => {
+        yargs.option('format', {
+          type: 'string',
+          default: 'json',
+          choices: ['json', 'dot', 'mermaid', 'adjacency', 'html', 'svg'],
+          description: '导出格式'
+        })
+        .option('layout', {
+          type: 'string',
+          default: 'force',
+          choices: ['force', 'tree', 'radial'],
+          description: '布局算法（html/svg/json 时生效）'
+        })
+        .option('rid', {
+          type: 'string',
+          description: '中心资源（邻域视图）'
+        })
+        .option('depth', {
+          type: 'number',
+          default: 2,
+          description: '邻域深度'
+        })
+        .option('type', {
+          type: 'string',
+          description: '关系类型过滤'
+        })
+        .option('output', {
+          type: 'string',
+          alias: 'o',
+          description: '输出文件路径'
+        });
+      }, graphCmd.export)
+
+      .command('analyze <type>', '图分析（pagerank/central/isolated/clusters）', (yargs) => {
+        yargs
+          .positional('type', {
+            type: 'string',
+            choices: ['pagerank', 'central', 'isolated', 'clusters'],
+            description: '分析类型'
+          })
+          .option('top', { type: 'number', default: 10, description: 'Top N 结果' });
+      }, graphCmd.analyze)
+
+      .command('query <resource>', '图查询 DSL', (yargs) => {
+        yargs
+          .positional('resource', { type: 'string', description: '起始资源' })
+          .option('depth', { type: 'number', default: 1, description: '遍历深度' })
+          .option('direction', { type: 'string', default: 'both', choices: ['outgoing', 'incoming', 'both'], description: '遍历方向' })
+          .option('type', { type: 'string', description: '关系类型过滤' });
+      }, graphCmd.query)
+
+      .command('neighborhood <resource>', '资源邻域视图（Phase 5.5）', (yargs) => {
+        yargs
+          .positional('resource', { type: 'string', description: '资源名称或 RID' })
+          .option('depth', { type: 'number', default: 2, description: '探索深度' });
+      }, graphCmd.neighborhood)
+
+      .command('explain <a> <b>', '解释两个资源之间的知识路径（Phase 5.5）', (yargs) => {
+        yargs
+          .positional('a', { type: 'string', description: '起始资源' })
+          .positional('b', { type: 'string', description: '目标资源' });
+      }, graphCmd.explain)
+
+      .demandCommand(1, '请指定图子命令。可用: neighbors, backlinks, path, cycles, export, analyze, query, neighborhood, explain');
+  })
+
   .command('move <rid> <dest>', '移动资源', (yargs) => {
     yargs
       .positional('rid', {
@@ -492,8 +607,46 @@ cli
             description: '跳过自动扫描成员',
             default: false
           });
-      }, resource)
+      }, createResourceCmd)
       .demandCommand(1, '请指定 create 的子命令');
+  })
+
+  .command('resource', '资源导航（Phase 5.5）', (yargs) => {
+    yargs
+      .command('related <resource>', '相关资源推荐', (yargs) => {
+        yargs
+          .positional('resource', { type: 'string', description: '资源名称或 RID' })
+          .option('top', { type: 'number', default: 10, description: '推荐数量' });
+      }, graphCmd.related)
+
+      .command('backlinks <resource>', '反向链接（谁引用了我）', (yargs) => {
+        yargs
+          .positional('resource', { type: 'string', description: '资源名称或 RID' });
+      }, graphCmd.resourceBacklinks)
+
+      .command('impact <resource>', '影响分析', (yargs) => {
+        yargs
+          .positional('resource', { type: 'string', description: '资源名称或 RID' });
+      }, graphCmd.impact)
+
+      .demandCommand(1, '请指定资源子命令。可用: related, backlinks, impact');
+  })
+
+  .command('knowledge', '知识智能（Phase 5.7）', (yargs) => {
+    yargs
+      .command('analyze', '知识分析报告（密度、孤岛、缺口）', {}, graphCmd.knowledgeAnalyze)
+
+      .command('gaps', '知识缺口检测', {}, graphCmd.knowledgeGaps)
+
+      .command('recommend <resource>', '智能推荐（关联知识 + 下一步学习）', (yargs) => {
+        yargs
+          .positional('resource', { type: 'string', description: '资源名称或 RID' })
+          .option('top', { type: 'number', default: 10, description: '推荐数量' });
+      }, graphCmd.knowledgeRecommend)
+
+      .command('timeline', '知识演化时间线', {}, graphCmd.knowledgeTimeline)
+
+      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline');
   })
 
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {

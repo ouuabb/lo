@@ -12,6 +12,17 @@ const SyncConfigService = require('./syncConfigService.cjs');
 const OperationRegistry = require('./operationRegistry.cjs');
 const OperationEngine = require('./operationEngine.cjs');
 const TransactionEngine = require('./transactionEngine.cjs');
+const GraphBuilder = require('./graphBuilder.cjs');
+const GraphEngine = require('./graphEngine.cjs');
+const GraphExporter = require('./graphExporter.cjs');
+const GraphCache = require('./graphCache.cjs');
+const GraphQueryBuilder = require('../domain/graphQuery.cjs');
+const NavigationEngine = require('./navigationEngine.cjs');
+const VisualizationEngine = require('./visualizationEngine.cjs');
+const VisualExporter = require('./visualExporter.cjs');
+const KnowledgeAnalyzer = require('./knowledgeAnalyzer.cjs');
+const KnowledgeTimeline = require('./knowledgeTimeline.cjs');
+const RecommendationEngine = require('./recommendationEngine.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -33,6 +44,7 @@ class Repository {
     this.operationRegistry = null;
     this.operationEngine = null;
     this.transactionEngine = null;
+    this._graphCache = null;
     this.containerService = null;
     this.sourceService = null;
     this.syncEngine = null;
@@ -50,6 +62,7 @@ class Repository {
     });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
+    this._graphCache = new GraphCache();
     this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
     this.containerService = new ContainerService(this.db, this.resourceService, {
       getCryptoKey: () => this._cryptoKey
@@ -595,6 +608,7 @@ class Repository {
     loadOperations(this.operationRegistry);
 
     this.operationEngine = new OperationEngine(this.db, this.operationRegistry, this.containerService);
+    this.operationEngine.setService('relationService', this.relationService);
     this.transactionEngine = new TransactionEngine(this.db, this.operationEngine);
   }
 
@@ -1052,10 +1066,381 @@ class Repository {
 
   async unlinkResources(ridA, ridB, type) {
     if (type === 'wikilink') {
-      return this.relationService.remove(ridA, ridB, type);
+      return this.relationService.removeByTriple(ridA, ridB, type);
     }
-    return this.relationService.removeBidirectional(ridA, ridB, type);
+    await this.relationService.removeByTriple(ridA, ridB, type);
+    await this.relationService.removeByTriple(ridB, ridA, type);
+    return { removed: true };
   }
+
+  /**
+   * Phase 5.1: 创建关系
+   * Phase 5.2: 通过 OperationEngine 执行（获得 undo/redo/history）
+   */
+  async createRelation(fromRid, toRid, type = 'reference', metadata = {}) {
+    const { result } = await this.operationEngine.execute('relation.create', {
+      fromRid, toRid, type, metadata
+    });
+    this._invalidateGraphCache();
+    return result;
+  }
+
+  /**
+   * Phase 5.1: 软删除关系（按 id）
+   * Phase 5.2: 通过 OperationEngine 执行
+   */
+  async removeRelation(id) {
+    // 预加载完整关系数据用于 undo 重建
+    const rel = await this.relationService.getById(id);
+    if (!rel) throw new Error(`关系不存在: ${id}`);
+
+    const { result } = await this.operationEngine.execute('relation.remove', {
+      id,
+      fromRid: rel.from_rid,
+      toRid: rel.to_rid,
+      type: rel.type,
+      metadata: rel.metadata
+    });
+    this._invalidateGraphCache();
+    return result;
+  }
+
+  /**
+   * Phase 5.1: 更新关系
+   * Phase 5.2: 通过 OperationEngine 执行
+   */
+  async updateRelation(id, updates) {
+    // 读取旧状态用于 undo
+    const old = await this.relationService.getById(id);
+    if (!old) throw new Error(`关系不存在: ${id}`);
+
+    const params = {
+      id,
+      updates,
+      oldType: old.type,
+      oldMetadata: old.metadata
+    };
+
+    const { result } = await this.operationEngine.execute('relation.update', params);
+    this._invalidateGraphCache();
+    return result;
+  }
+
+  /**
+   * Phase 5.1: 获取单条关系
+   */
+  async getRelation(id) {
+    return this.relationService.getById(id);
+  }
+
+  /**
+   * Phase 5.1: 列出关系（支持过滤）
+   */
+  async listRelations(filter = {}) {
+    return this.relationService.listAll(filter);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.3: Graph API
+  // ──────────────────────────────────────
+
+  /**
+   * 构建资源关系图
+   */
+  async getGraph() {
+    if (this._graphCache && this._graphCache.has()) {
+      return this._graphCache.get();
+    }
+    const relations = await this.relationService.listAll({ limit: 10000 });
+    const builder = new GraphBuilder();
+    const graph = builder.build(relations);
+    if (this._graphCache) this._graphCache.set(graph);
+    return graph;
+  }
+
+  /**
+   * 使图缓存失效（relation 变更后调用）
+   */
+  _invalidateGraphCache() {
+    if (this._graphCache) this._graphCache.invalidate();
+  }
+
+  async _getGraphEngine() {
+    const graph = await this.getGraph();
+    return new GraphEngine(graph);
+  }
+
+  async getNeighbors(rid) {
+    const engine = await this._getGraphEngine();
+    return engine.neighbors(rid);
+  }
+
+  async getBacklinks(rid) {
+    const engine = await this._getGraphEngine();
+    return engine.incoming(rid);
+  }
+
+  async getOutgoingLinks(rid) {
+    const engine = await this._getGraphEngine();
+    return engine.outgoing(rid);
+  }
+
+  async findPath(fromRid, toRid) {
+    const engine = await this._getGraphEngine();
+    return engine.findPath(fromRid, toRid);
+  }
+
+  async detectCycles() {
+    const engine = await this._getGraphEngine();
+    return engine.detectCycles();
+  }
+
+  async getReachable(rid) {
+    const engine = await this._getGraphEngine();
+    return engine.reachable(rid);
+  }
+
+  async getSubGraph(rid, depth = 2) {
+    const engine = await this._getGraphEngine();
+    return engine.subGraph(rid, depth);
+  }
+
+  async getGraphStats() {
+    const engine = await this._getGraphEngine();
+    return engine.stats();
+  }
+
+  /**
+   * Phase 5.4: PageRank 分析
+   */
+  async getPageRank(options) {
+    const engine = await this._getGraphEngine();
+    return engine.pageRank(options);
+  }
+
+  /**
+   * Phase 5.4: 中心节点
+   */
+  async getCentralNodes(topN) {
+    const engine = await this._getGraphEngine();
+    return engine.centralNodes(topN);
+  }
+
+  /**
+   * Phase 5.4: 孤立节点
+   */
+  async getIsolatedNodes() {
+    const engine = await this._getGraphEngine();
+    return engine.isolatedNodes();
+  }
+
+  /**
+   * Phase 5.4: 聚簇分析
+   */
+  async getClusters() {
+    const engine = await this._getGraphEngine();
+    return engine.clusters();
+  }
+
+  /**
+   * Phase 5.4: 图查询 DSL
+   * @returns {GraphQueryBuilder}
+   */
+  queryGraph() {
+    // queryGraph 每次都重建（保证最新），不使用缓存
+    const relationsPromise = this.relationService.listAll({ limit: 10000 });
+    // 返回 lazy builder，在 run() 时才执行查询
+    return {
+      from: (rid) => this._buildQuery(rid, relationsPromise)
+    };
+  }
+
+  async _buildQuery(rid, relationsPromise) {
+    const relations = await relationsPromise;
+    const builder = new GraphBuilder();
+    const graph = builder.build(relations);
+    const engine = new GraphEngine(graph);
+    return new GraphQueryBuilder(engine).from(rid);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.5: Knowledge Navigation API
+  // ──────────────────────────────────────
+
+  async _getNavigationEngine() {
+    const engine = await this._getGraphEngine();
+    return new NavigationEngine(engine);
+  }
+
+  /**
+   * 相关资源推荐
+   */
+  async getRelatedResources(rid, options) {
+    const nav = await this._getNavigationEngine();
+    return nav.related(rid, options);
+  }
+
+  /**
+   * 反向链接详情（带关系类型）
+   */
+  async getBacklinkDetails(rid) {
+    const nav = await this._getNavigationEngine();
+    return nav.backlinks(rid);
+  }
+
+  /**
+   * 资源邻域视图
+   */
+  async getResourceNeighborhood(rid, depth = 2) {
+    const nav = await this._getNavigationEngine();
+    return nav.neighborhood(rid, { depth });
+  }
+
+  /**
+   * 知识路径解释
+   */
+  async getExplainPath(a, b) {
+    const nav = await this._getNavigationEngine();
+    return nav.explainPath(a, b);
+  }
+
+  /**
+   * 影响分析
+   */
+  async analyzeImpact(rid) {
+    const nav = await this._getNavigationEngine();
+    return nav.impact(rid);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.6: Visualization API
+  // ──────────────────────────────────────
+
+  async _getVisualizationEngine() {
+    const engine = await this._getGraphEngine();
+    return new VisualizationEngine(engine);
+  }
+
+  /**
+   * 可视化图（支持完整/邻域/类型三种视图）
+   */
+  async visualizeGraph(options = {}) {
+    const ve = await this._getVisualizationEngine();
+    return ve.visualize(options);
+  }
+
+  /**
+   * 导出可视化结果
+   */
+  async exportVisualGraph(options = {}) {
+    const { format = 'json', layout = 'force', rid, depth, type: graphType, width, height } = options;
+    const ve = await this._getVisualizationEngine();
+
+    let vg;
+    if (rid) {
+      vg = ve.visualizeNeighborhood(rid, { depth: depth || 2, layout, width, height });
+    } else if (graphType) {
+      vg = ve.visualizeByType(graphType, { layout, width, height });
+    } else {
+      vg = ve.visualizeFull({ layout, width, height });
+    }
+
+    if (!vg) throw new Error('Visualization failed');
+
+    const exporter = new VisualExporter(vg, { width, height });
+
+    switch (format) {
+      case 'html': return exporter.toHTML();
+      case 'svg':  return exporter.toSVG();
+      case 'json': return exporter.toJSON();
+      default: throw new Error(`不支持的导出格式: ${format}`);
+    }
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.7: Knowledge Intelligence API
+  // ──────────────────────────────────────
+
+  async _getKnowledgeAnalyzer() {
+    const engine = await this._getGraphEngine();
+    const nav = await this._getNavigationEngine();
+    return new KnowledgeAnalyzer(engine, nav);
+  }
+
+  /**
+   * 知识分析报告
+   */
+  async analyzeKnowledge() {
+    const analyzer = await this._getKnowledgeAnalyzer();
+    return analyzer.report();
+  }
+
+  /**
+   * 知识密度
+   */
+  async getKnowledgeDensity() {
+    const analyzer = await this._getKnowledgeAnalyzer();
+    return analyzer.density();
+  }
+
+  /**
+   * 知识缺口检测
+   */
+  async findKnowledgeGaps(options) {
+    const analyzer = await this._getKnowledgeAnalyzer();
+    return analyzer.gaps(options);
+  }
+
+  /**
+   * 推荐
+   */
+  async _getRecommendationEngine() {
+    const engine = await this._getGraphEngine();
+    const nav = await this._getNavigationEngine();
+    return new RecommendationEngine(engine, nav);
+  }
+
+  async getRecommendations(rid, options) {
+    const rec = await this._getRecommendationEngine();
+    return rec.related(rid, options);
+  }
+
+  async getNextLearning(rid, options) {
+    const rec = await this._getRecommendationEngine();
+    return rec.nextLearning(rid, options);
+  }
+
+  async getForgottenKnowledge(options) {
+    const rec = await this._getRecommendationEngine();
+    return rec.forgotten(options);
+  }
+
+  /**
+   * 知识演化时间线
+   */
+  async getKnowledgeTimeline() {
+    const timeline = new KnowledgeTimeline(this.db);
+    const [monthly, growth, activity] = await Promise.all([
+      timeline.monthly(),
+      timeline.growthRate(),
+      timeline.activity()
+    ]);
+    return { monthly, growth, activity };
+  }
+
+  async exportGraph(format = 'json', options = {}) {
+    const graph = await this.getGraph();
+    const exporter = new GraphExporter(graph);
+    switch (format) {
+      case 'json':      return exporter.toJSON();
+      case 'dot':       return exporter.toDOT(options);
+      case 'mermaid':   return exporter.toMermaid(options);
+      case 'adjacency': return exporter.toAdjacencyList();
+      default: throw new Error(`不支持的导出格式: ${format}`);
+    }
+  }
+
+  // ──────────────────────────────────────
 
   /**
    * 同步指定资源的 wikilink 关系
@@ -1080,7 +1465,7 @@ class Repository {
       const oldLinks = await this.relationService.getByFromRid(rid);
       for (const old of oldLinks) {
         if (old.type === 'wikilink') {
-          await this.relationService.remove(rid, old.to_rid, 'wikilink');
+          await this.relationService.removeByTriple(rid, old.to_rid, 'wikilink');
         }
       }
 

@@ -282,6 +282,9 @@ class Database {
 
     // V8: container_transactions + transaction_id
     await this._migrateContainerTransactionsV8();
+
+    // V9: relations 表升级（Phase 5.1）
+    await this._migrateRelationsV9();
   }
 
   run(sql, params = []) {
@@ -694,6 +697,37 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_transaction ON container_operations(transaction_id)`);
     } catch (e) {
       console.error('[migrate] container_transactions V8 失败:', e.message);
+    }
+  }
+
+  /**
+   * V9: relations 表升级 — 增加 metadata、updated、deleted 字段 + 索引
+   * Phase 5.1
+   */
+  async _migrateRelationsV9() {
+    try {
+      // 新增字段（ALTER TABLE ADD COLUMN，已存在则忽略）
+      for (const col of [
+        { name: 'metadata', def: "TEXT DEFAULT '{}'" },
+        { name: 'updated', def: 'INTEGER' },
+        { name: 'deleted', def: 'INTEGER DEFAULT 0' }
+      ]) {
+        try {
+          await this.run(`ALTER TABLE relations ADD COLUMN ${col.name} ${col.def}`);
+        } catch (e) { /* 列已存在 */ }
+      }
+
+      // 索引
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_relations_deleted ON relations(deleted)`);
+
+      // Phase 5.2: 确保 __system__ 资源存在（用于 relation 等非容器操作）
+      await this.run(
+        `INSERT OR IGNORE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated)
+         VALUES ('__system__', '__system__', 0, 'system', '', '', '{}', 0, ?, ?)`,
+        [Date.now(), Date.now()]
+      );
+    } catch (e) {
+      console.error('[migrate] relations V9 失败:', e.message);
     }
   }
 
