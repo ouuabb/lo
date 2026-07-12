@@ -163,6 +163,14 @@ class SecurityManager {
       [policy.id, policy.subject, policy.resource, JSON.stringify(policy.actions),
        policy.effect, policy.priority, JSON.stringify(policy.condition), JSON.stringify(policy.metadata)]
     );
+    // 同步写入 policy_actions 表
+    await this.db.run('DELETE FROM policy_actions WHERE policy_id = ?', [policy.id]);
+    for (const action of policy.actions) {
+      await this.db.run(
+        'INSERT OR IGNORE INTO policy_actions (policy_id, action) VALUES (?, ?)',
+        [policy.id, action]
+      );
+    }
 
     // 发布事件
     this.eventEmitter.policyChanged('system', policy.id);

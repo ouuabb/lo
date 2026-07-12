@@ -1449,21 +1449,12 @@ route('PUT', '/api/admin/types/:name', async (req, res, { repo, url }) => {
 route('GET', '/api/admin/tags', async (req, res, { repo }) => {
   try {
     const rows = await repo.db.all(
-      "SELECT metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+      `SELECT rt.tag, COUNT(*) as count
+       FROM resource_tags rt
+       GROUP BY rt.tag
+       ORDER BY count DESC`
     );
-    const tagCounts = {};
-    for (const row of rows) {
-      try {
-        const m = JSON.parse(row.metadata || '{}');
-        const tags = Array.isArray(m.tags) ? m.tags : [];
-        for (const t of tags) {
-          if (t && t.trim()) tagCounts[t] = (tagCounts[t] || 0) + 1;
-        }
-      } catch {}
-    }
-    const data = Object.entries(tagCounts)
-      .map(([tag, count]) => ({ tag, count }))
-      .sort((a, b) => b.count - a.count);
+    const data = rows.map(r => ({ tag: r.tag, count: r.count }));
     jsonOk(res, { data });
   } catch (e) {
     serverError(res, e.message);
@@ -1481,18 +1472,34 @@ route('PUT', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
   if (!newTag) return badRequest(res, '缺少 newTag 字段');
 
   try {
+    // 重命名标签：更新 resource_tags 表
     const rows = await repo.db.all(
-      "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+      'SELECT resource_rid FROM resource_tags WHERE tag = ?', [oldTag]
     );
     let affected = 0;
     for (const row of rows) {
+      await repo.db.run(
+        'DELETE FROM resource_tags WHERE resource_rid = ? AND tag = ?',
+        [row.resource_rid, oldTag]
+      );
+      await repo.db.run(
+        'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+        [row.resource_rid, newTag]
+      );
+      affected++;
+    }
+    // 同步更新 resources.metadata JSON（向后兼容）
+    const metaRows = await repo.db.all(
+      "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+    );
+    for (const row of metaRows) {
       try {
         const m = JSON.parse(row.metadata || '{}');
         const tags = Array.isArray(m.tags) ? m.tags : [];
         if (tags.includes(oldTag)) {
           const newTags = tags.map(t => t === oldTag ? newTag : t);
-          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?', [JSON.stringify({ ...m, tags: newTags }), row.rid]);
-          affected++;
+          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?',
+            [JSON.stringify({ ...m, tags: newTags }), row.rid]);
         }
       } catch {}
     }
@@ -1508,6 +1515,9 @@ route('DELETE', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
   const tag = decodeURIComponent(match[1]);
 
   try {
+    // 从 resource_tags 表删除
+    await repo.db.run('DELETE FROM resource_tags WHERE tag = ?', [tag]);
+    // 同步更新 resources.metadata JSON（向后兼容）
     const rows = await repo.db.all(
       "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
     );
@@ -1518,7 +1528,8 @@ route('DELETE', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
         const tags = Array.isArray(m.tags) ? m.tags : [];
         if (tags.includes(tag)) {
           const newTags = tags.filter(t => t !== tag);
-          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?', [JSON.stringify({ ...m, tags: newTags }), row.rid]);
+          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?',
+            [JSON.stringify({ ...m, tags: newTags }), row.rid]);
           affected++;
         }
       } catch {}

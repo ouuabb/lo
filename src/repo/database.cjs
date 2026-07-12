@@ -327,6 +327,9 @@ class Database {
 
     // V23: Phase 6.10 Knowledge Runtime
     await this._migrateRuntimeV23();
+
+    // V24: Normalize embedded arrays into dedicated tables
+    await this._migrateNormalizeV24();
   }
 
   run(sql, params = []) {
@@ -1398,6 +1401,172 @@ class Database {
       console.log('[migrate] Security V22 ok');
     } catch (e) {
       console.error('[migrate] Security V22 失败:', e.message);
+    }
+  }
+
+  /**
+   * V24: Normalize 5 embedded JSON arrays into dedicated tables.
+   *
+   *   1. resource_tags           — resources.metadata.tags
+   *   2. resource_capabilities    — resources.capabilities
+   *   3. container_ignore_patterns — resources.container_schema.ignored_patterns
+   *   4. role_permissions         — roles.permissions
+   *   5. policy_actions           — policies.action
+   *
+   * Existing JSON columns are preserved for backward compatibility.
+   * New reads should prefer the dedicated tables.
+   */
+  async _migrateNormalizeV24() {
+    try {
+      // 1. resource_tags
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS resource_tags (
+          resource_rid TEXT NOT NULL,
+          tag TEXT NOT NULL,
+          PRIMARY KEY (resource_rid, tag),
+          FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_rt_tag ON resource_tags(tag)`);
+
+      // Migrate data from metadata JSON
+      const resRows = await this.all(
+        `SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'`
+      );
+      for (const row of resRows) {
+        try {
+          const m = JSON.parse(row.metadata || '{}');
+          const tags = Array.isArray(m.tags) ? m.tags : [];
+          for (const t of tags) {
+            if (t && t.trim()) {
+              await this.run(
+                'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+                [row.rid, t.trim()]
+              );
+            }
+          }
+        } catch {}
+      }
+
+      // 2. resource_capabilities
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS resource_capabilities (
+          resource_rid TEXT NOT NULL,
+          capability TEXT NOT NULL,
+          PRIMARY KEY (resource_rid, capability),
+          FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_rc_cap ON resource_capabilities(capability)`);
+
+      try {
+        const capRows = await this.all(
+          `SELECT rid, capabilities FROM resources WHERE deleted = 0 AND capabilities IS NOT NULL`
+        );
+        for (const row of capRows) {
+          try {
+            const caps = JSON.parse(row.capabilities || '[]');
+            for (const c of caps) {
+              if (c && c.trim()) {
+                await this.run(
+                  'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
+                  [row.rid, c.trim()]
+                );
+              }
+            }
+          } catch {}
+        }
+      } catch (e) { /* capabilities 列可能不存在 */ }
+
+      // 3. container_ignore_patterns
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS container_ignore_patterns (
+          container_rid TEXT NOT NULL,
+          pattern TEXT NOT NULL,
+          PRIMARY KEY (container_rid, pattern),
+          FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE
+        )
+      `);
+
+      try {
+        const schemaRows = await this.all(
+          `SELECT rid, container_schema FROM resources WHERE deleted = 0 AND container_schema IS NOT NULL`
+        );
+        for (const row of schemaRows) {
+          try {
+            const schema = JSON.parse(row.container_schema || '{}');
+            const patterns = schema.ignored_patterns || [];
+            for (const p of patterns) {
+              if (p && p.trim()) {
+                await this.run(
+                  'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
+                  [row.rid, p.trim()]
+                );
+              }
+            }
+          } catch {}
+        }
+      } catch (e) { /* container_schema 列可能不存在 */ }
+
+      // 4. role_permissions
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS role_permissions (
+          role_id TEXT NOT NULL,
+          permission TEXT NOT NULL,
+          PRIMARY KEY (role_id, permission),
+          FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_rp_role ON role_permissions(role_id)`);
+
+      try {
+        const roleRows = await this.all(`SELECT id, permissions FROM roles`);
+        for (const row of roleRows) {
+          try {
+            const perms = JSON.parse(row.permissions || '[]');
+            for (const p of perms) {
+              if (p && p.trim()) {
+                await this.run(
+                  'INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)',
+                  [row.id, p.trim()]
+                );
+              }
+            }
+          } catch {}
+        }
+      } catch (e) { /* roles 表可能不存在 */ }
+
+      // 5. policy_actions
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS policy_actions (
+          policy_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          PRIMARY KEY (policy_id, action),
+          FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_pa_policy ON policy_actions(policy_id)`);
+
+      try {
+        const polRows = await this.all(`SELECT id, action FROM policies`);
+        for (const row of polRows) {
+          try {
+            const actions = JSON.parse(row.action || '[]');
+            for (const a of actions) {
+              if (a && a.trim()) {
+                await this.run(
+                  'INSERT OR IGNORE INTO policy_actions (policy_id, action) VALUES (?, ?)',
+                  [row.id, a.trim()]
+                );
+              }
+            }
+          } catch {}
+        }
+      } catch (e) { /* policies 表可能不存在 */ }
+
+      console.log('[migrate] Normalize V24 ok');
+    } catch (e) {
+      console.error('[migrate] Normalize V24 失败:', e.message);
     }
   }
 

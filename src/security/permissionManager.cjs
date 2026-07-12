@@ -49,7 +49,13 @@ class PermissionManager {
       const rows = await this.db.all('SELECT * FROM roles');
       for (const row of rows) {
         if (!this._roles.has(row.id)) {
-          const permissions = row.permissions ? JSON.parse(row.permissions) : [];
+          // 优先从 role_permissions 表读取
+          const permRows = await this.db.all(
+            'SELECT permission FROM role_permissions WHERE role_id = ?', [row.id]
+          );
+          const permissions = permRows.length > 0
+            ? permRows.map(p => p.permission)
+            : (row.permissions ? JSON.parse(row.permissions) : []);
           this._roles.set(row.id, new Role({
             id: row.id,
             name: row.name,
@@ -103,6 +109,14 @@ class PermissionManager {
       'INSERT OR REPLACE INTO roles (id, name, description, permissions) VALUES (?, ?, ?, ?)',
       [role.id, role.name, role.description, JSON.stringify(role.permissionCodes)]
     );
+    // 同步写入 role_permissions 表
+    await this.db.run('DELETE FROM role_permissions WHERE role_id = ?', [role.id]);
+    for (const perm of role.permissionCodes) {
+      await this.db.run(
+        'INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)',
+        [role.id, perm]
+      );
+    }
     this._roles.set(role.id, role);
     return role;
   }

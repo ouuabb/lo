@@ -727,15 +727,18 @@ class ContainerService {
 
   /**
    * 获取容器的忽略规则。
-   * 从 container_schema.ignored_patterns 读取，合并内置排除项。
+   * 从 container_ignore_patterns 表读取，合并内置排除项。
    *
    * @param {string} containerRid
    * @returns {Promise<string[]>} glob 模式数组
    */
   async getIgnorePatterns(containerRid) {
-    const schema = await this.getContainerSchema(containerRid);
     const builtin = ['node_modules/**', '.git/**', '.repo/**'];
-    const custom = schema.ignored_patterns || [];
+    const rows = await this.db.all(
+      'SELECT pattern FROM container_ignore_patterns WHERE container_rid = ?',
+      [containerRid]
+    );
+    const custom = rows.map(r => r.pattern);
     return [...builtin, ...custom];
   }
 

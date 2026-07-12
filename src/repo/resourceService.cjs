@@ -159,6 +159,37 @@ class ResourceService {
     `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(metadata), encrypted ? 1 : 0,
         JSON.stringify(capabilities), JSON.stringify(container_schema), now, now]);
 
+    // 同步写入 resource_tags
+    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+    for (const t of tags) {
+      if (t && t.trim()) {
+        await this.db.run(
+          'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+          [rid, t.trim()]
+        );
+      }
+    }
+    // 同步写入 resource_capabilities
+    for (const c of capabilities) {
+      if (c && c.trim()) {
+        await this.db.run(
+          'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
+          [rid, c.trim()]
+        );
+      }
+    }
+    // 同步写入 container_ignore_patterns
+    if (container_schema && container_schema.ignored_patterns) {
+      for (const p of container_schema.ignored_patterns) {
+        if (p && p.trim()) {
+          await this.db.run(
+            'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
+            [rid, p.trim()]
+          );
+        }
+      }
+    }
+
     return { rid, name, layer, type, path: filePath, hash: plainHash, metadata, encrypted,
              capabilities, container_schema, created: now, updated: now };
   }
@@ -355,6 +386,46 @@ class ResourceService {
     
     if (result.changes === 0) {
       throw new Error('Resource not found');
+    }
+
+    // 同步 resource_tags
+    if (metadata && metadata.tags !== undefined) {
+      await this.db.run('DELETE FROM resource_tags WHERE resource_rid = ?', [rid]);
+      const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+      for (const t of tags) {
+        if (t && t.trim()) {
+          await this.db.run(
+            'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+            [rid, t.trim()]
+          );
+        }
+      }
+    }
+    // 同步 resource_capabilities
+    if (capabilities !== undefined) {
+      await this.db.run('DELETE FROM resource_capabilities WHERE resource_rid = ?', [rid]);
+      for (const c of capabilities) {
+        if (c && c.trim()) {
+          await this.db.run(
+            'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
+            [rid, c.trim()]
+          );
+        }
+      }
+    }
+    // 同步 container_ignore_patterns
+    if (container_schema !== undefined) {
+      await this.db.run('DELETE FROM container_ignore_patterns WHERE container_rid = ?', [rid]);
+      const patterns = container_schema && container_schema.ignored_patterns
+        ? container_schema.ignored_patterns : [];
+      for (const p of patterns) {
+        if (p && p.trim()) {
+          await this.db.run(
+            'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
+            [rid, p.trim()]
+          );
+        }
+      }
     }
     
     return this.getByRid(rid);
