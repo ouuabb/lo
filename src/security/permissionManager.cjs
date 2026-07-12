@@ -49,13 +49,11 @@ class PermissionManager {
       const rows = await this.db.all('SELECT * FROM roles');
       for (const row of rows) {
         if (!this._roles.has(row.id)) {
-          // 优先从 role_permissions 表读取
+          // 从 role_permissions 表读取权限
           const permRows = await this.db.all(
             'SELECT permission FROM role_permissions WHERE role_id = ?', [row.id]
           );
-          const permissions = permRows.length > 0
-            ? permRows.map(p => p.permission)
-            : (row.permissions ? JSON.parse(row.permissions) : []);
+          const permissions = permRows.map(p => p.permission);
           this._roles.set(row.id, new Role({
             id: row.id,
             name: row.name,
@@ -106,10 +104,10 @@ class PermissionManager {
   async createRole(roleDef) {
     const role = new Role(roleDef);
     await this.db.run(
-      'INSERT OR REPLACE INTO roles (id, name, description, permissions) VALUES (?, ?, ?, ?)',
-      [role.id, role.name, role.description, JSON.stringify(role.permissionCodes)]
+      'INSERT OR REPLACE INTO roles (id, name, description) VALUES (?, ?, ?)',
+      [role.id, role.name, role.description]
     );
-    // 同步写入 role_permissions 表
+    // 写入 role_permissions 表
     await this.db.run('DELETE FROM role_permissions WHERE role_id = ?', [role.id]);
     for (const perm of role.permissionCodes) {
       await this.db.run(

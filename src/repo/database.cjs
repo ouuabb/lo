@@ -1564,6 +1564,50 @@ class Database {
         }
       } catch (e) { /* policies 表可能不存在 */ }
 
+      // --- 迁移完成后，清理旧 JSON 列 --- //
+
+      // 从 metadata JSON 中剥离 tags（tags 已迁入 resource_tags 表）
+      const allMeta = await this.all(
+        "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+      );
+      for (const row of allMeta) {
+        try {
+          const m = JSON.parse(row.metadata || '{}');
+          if (m.tags !== undefined) {
+            const { tags: _, ...rest } = m;
+            await this.run('UPDATE resources SET metadata = ? WHERE rid = ?',
+              [JSON.stringify(rest), row.rid]);
+          }
+        } catch {}
+      }
+
+      // 删除 resources.capabilities 列
+      try { await this.run('ALTER TABLE resources DROP COLUMN capabilities'); } catch {}
+
+      // 从 container_schema JSON 中剥离 ignored_patterns（已迁入 container_ignore_patterns 表）
+      // container_schema 列保留（含 type / allowed_types / refresh_interval 等字段）
+      try {
+        const schemaRows = await this.all(
+          `SELECT rid, container_schema FROM resources WHERE deleted = 0 AND container_schema IS NOT NULL`
+        );
+        for (const row of schemaRows) {
+          try {
+            const s = JSON.parse(row.container_schema || '{}');
+            if (s.ignored_patterns !== undefined) {
+              const { ignored_patterns: _, ...rest } = s;
+              await this.run('UPDATE resources SET container_schema = ? WHERE rid = ?',
+                [JSON.stringify(rest), row.rid]);
+            }
+          } catch {}
+        }
+      } catch {}
+
+      // 删除 roles.permissions 列
+      try { await this.run('ALTER TABLE roles DROP COLUMN permissions'); } catch {}
+
+      // 删除 policies.action 列
+      try { await this.run('ALTER TABLE policies DROP COLUMN action'); } catch {}
+
       console.log('[migrate] Normalize V24 ok');
     } catch (e) {
       console.error('[migrate] Normalize V24 失败:', e.message);

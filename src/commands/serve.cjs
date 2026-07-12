@@ -741,8 +741,14 @@ route('GET', '/api/admin/resources/:rid', async (req, res, { repo, url }) => {
       relations = await repo.getRelations(rid);
     } catch {}
 
-    // 获取标签
-    const tags = (resource.metadata && resource.metadata.tags) || [];
+    // 获取标签（从 resource_tags 表）
+    let tags = [];
+    try {
+      const tagRows = await repo.db.all(
+        'SELECT tag FROM resource_tags WHERE resource_rid = ?', [rid]
+      );
+      tags = tagRows.map(r => r.tag);
+    } catch {}
 
     jsonOk(res, {
       ...resource,
@@ -1188,22 +1194,20 @@ route('PUT', '/api/admin/resources/:rid/tags', async (req, res, { repo, url }) =
   if (!rid) return notFound(res, 'Invalid rid');
 
   let body;
-  try {
-    body = await readBody(req);
-  } catch (e) {
-    return badRequest(res, e.message);
-  }
-
+  try { body = await readBody(req); } catch (e) { return badRequest(res, e.message); }
   const { tags } = body;
   if (!Array.isArray(tags)) return badRequest(res, 'tags 必须是数组');
 
   try {
-    const resource = await repo.getResource(rid);
-    if (!resource) return notFound(res, 'Resource not found');
-
-    const metadata = { ...(resource.metadata || {}), tags };
-    await repo.updateResource(rid, { metadata });
-
+    await repo.db.run('DELETE FROM resource_tags WHERE resource_rid = ?', [rid]);
+    for (const t of tags) {
+      if (t && t.trim()) {
+        await repo.db.run(
+          'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+          [rid, t.trim()]
+        );
+      }
+    }
     jsonOk(res, { ok: true, rid, tags });
   } catch (e) {
     serverError(res, e.message);
@@ -1220,15 +1224,11 @@ route('DELETE', '/api/admin/resources/:rid/tags/:tag', async (req, res, { repo, 
   if (!tag) return notFound(res, 'Invalid tag');
 
   try {
-    const resource = await repo.getResource(rid);
-    if (!resource) return notFound(res, 'Resource not found');
-
-    const tags = (resource.metadata && resource.metadata.tags) || [];
-    const newTags = tags.filter(t => t !== tag);
-    const metadata = { ...(resource.metadata || {}), tags: newTags };
-    await repo.updateResource(rid, { metadata });
-
-    jsonOk(res, { ok: true, rid, tag: tag, tags: newTags });
+    await repo.db.run(
+      'DELETE FROM resource_tags WHERE resource_rid = ? AND tag = ?',
+      [rid, tag]
+    );
+    jsonOk(res, { ok: true, rid, tag });
   } catch (e) {
     serverError(res, e.message);
   }
@@ -1488,21 +1488,6 @@ route('PUT', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
       );
       affected++;
     }
-    // 同步更新 resources.metadata JSON（向后兼容）
-    const metaRows = await repo.db.all(
-      "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
-    );
-    for (const row of metaRows) {
-      try {
-        const m = JSON.parse(row.metadata || '{}');
-        const tags = Array.isArray(m.tags) ? m.tags : [];
-        if (tags.includes(oldTag)) {
-          const newTags = tags.map(t => t === oldTag ? newTag : t);
-          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?',
-            [JSON.stringify({ ...m, tags: newTags }), row.rid]);
-        }
-      } catch {}
-    }
     jsonOk(res, { ok: true, oldTag, newTag, affected });
   } catch (e) {
     serverError(res, e.message);
@@ -1517,24 +1502,7 @@ route('DELETE', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
   try {
     // 从 resource_tags 表删除
     await repo.db.run('DELETE FROM resource_tags WHERE tag = ?', [tag]);
-    // 同步更新 resources.metadata JSON（向后兼容）
-    const rows = await repo.db.all(
-      "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
-    );
-    let affected = 0;
-    for (const row of rows) {
-      try {
-        const m = JSON.parse(row.metadata || '{}');
-        const tags = Array.isArray(m.tags) ? m.tags : [];
-        if (tags.includes(tag)) {
-          const newTags = tags.filter(t => t !== tag);
-          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?',
-            [JSON.stringify({ ...m, tags: newTags }), row.rid]);
-          affected++;
-        }
-      } catch {}
-    }
-    jsonOk(res, { ok: true, tag, affected });
+    jsonOk(res, { ok: true, tag });
   } catch (e) {
     serverError(res, e.message);
   }

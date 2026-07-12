@@ -158,12 +158,12 @@ class SecurityManager {
   async addPolicy(policyDef) {
     const policy = new Policy(policyDef);
     await this.db.run(
-      `INSERT INTO policies (id, subject, resource, action, effect, priority, condition_JSON, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [policy.id, policy.subject, policy.resource, JSON.stringify(policy.actions),
+      `INSERT INTO policies (id, subject, resource, effect, priority, condition_JSON, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [policy.id, policy.subject, policy.resource,
        policy.effect, policy.priority, JSON.stringify(policy.condition), JSON.stringify(policy.metadata)]
     );
-    // 同步写入 policy_actions 表
+    // 写入 policy_actions 表
     await this.db.run('DELETE FROM policy_actions WHERE policy_id = ?', [policy.id]);
     for (const action of policy.actions) {
       await this.db.run(

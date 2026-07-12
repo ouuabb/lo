@@ -153,11 +153,12 @@ class ResourceService {
     const rid = preRid || RidUtils.generate();
     const encrypted = alreadyEncrypted || !!this._cryptoKey;
 
+    const cleanMeta = { ...metadata }; delete cleanMeta.tags;
     await this.db.run(`
-      INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, capabilities, container_schema, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(metadata), encrypted ? 1 : 0,
-        JSON.stringify(capabilities), JSON.stringify(container_schema), now, now]);
+      INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, container_schema, created, updated)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(cleanMeta), encrypted ? 1 : 0,
+        JSON.stringify(container_schema), now, now]);
 
     // 同步写入 resource_tags
     const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
@@ -191,7 +192,7 @@ class ResourceService {
     }
 
     return { rid, name, layer, type, path: filePath, hash: plainHash, metadata, encrypted,
-             capabilities, container_schema, created: now, updated: now };
+             capabilities, created: now, updated: now };
   }
 
   async getByRid(rid) {
@@ -201,7 +202,10 @@ class ResourceService {
     
     if (!row) return null;
     
-    return this._hydrate(row);
+    const resource = this._hydrate(row);
+    resource.tags = await this._loadTags(rid);
+    resource.capabilities = await this._loadCapabilities(rid);
+    return resource;
   }
 
   async getByName(name) {
@@ -212,7 +216,10 @@ class ResourceService {
     
     if (!row) return null;
     
-    return this._hydrate(row);
+    const resource = this._hydrate(row);
+    resource.tags = await this._loadTags(resource.rid);
+    resource.capabilities = await this._loadCapabilities(resource.rid);
+    return resource;
   }
 
   async getByNameLayer(name, layer) {
@@ -222,7 +229,10 @@ class ResourceService {
     
     if (!row) return null;
     
-    return this._hydrate(row);
+    const resource = this._hydrate(row);
+    resource.tags = await this._loadTags(resource.rid);
+    resource.capabilities = await this._loadCapabilities(resource.rid);
+    return resource;
   }
 
   /**
@@ -235,7 +245,12 @@ class ResourceService {
       SELECT * FROM resources WHERE name = ? AND deleted = 0 ORDER BY layer ASC
     `, [name]);
     
-    return rows.map(row => this._hydrate(row));
+    const resources = rows.map(row => this._hydrate(row));
+    for (const r of resources) {
+      r.tags = await this._loadTags(r.rid);
+      r.capabilities = await this._loadCapabilities(r.rid);
+    }
+    return resources;
   }
 
   /**
@@ -339,7 +354,12 @@ class ResourceService {
     }
     
     const rows = await this.db.all(sql, params);
-    return rows.map(row => this._hydrate(row));
+    const resources = rows.map(row => this._hydrate(row));
+    for (const r of resources) {
+      r.tags = await this._loadTags(r.rid);
+      r.capabilities = await this._loadCapabilities(r.rid);
+    }
+    return resources;
   }
 
   async update(rid, updates) {
@@ -360,13 +380,9 @@ class ResourceService {
     
     if (metadata) {
       const validated = assertMetadata(metadata, 'resourceService.update');
+      const { tags: _, ...cleanMeta } = validated;
       sql += ', metadata = ?';
-      params.push(JSON.stringify(validated));
-    }
-
-    if (capabilities !== undefined) {
-      sql += ', capabilities = ?';
-      params.push(JSON.stringify(capabilities));
+      params.push(JSON.stringify(cleanMeta));
     }
 
     if (container_schema !== undefined) {
@@ -611,10 +627,24 @@ class ResourceService {
     return {
       ...row,
       metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
-      capabilities: typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : (row.capabilities || []),
       container_schema: typeof row.container_schema === 'string' ? JSON.parse(row.container_schema) : (row.container_schema || {}),
       encrypted: row.encrypted === 1 || row.encrypted === true
     };
+  }
+
+  async _loadTags(rid) {
+    const rows = await this.db.all('SELECT tag FROM resource_tags WHERE resource_rid = ?', [rid]);
+    return rows.map(r => r.tag);
+  }
+
+  async _loadCapabilities(rid) {
+    const rows = await this.db.all('SELECT capability FROM resource_capabilities WHERE resource_rid = ?', [rid]);
+    return rows.map(r => r.capability);
+  }
+
+  async _loadIgnorePatterns(rid) {
+    const rows = await this.db.all('SELECT pattern FROM container_ignore_patterns WHERE container_rid = ?', [rid]);
+    return rows.map(r => r.pattern);
   }
 }
 
