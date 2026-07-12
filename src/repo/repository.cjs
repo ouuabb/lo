@@ -56,6 +56,7 @@ const PermissionManager = require('../security/permissionManager.cjs');
 const PolicyEngine = require('../security/policyEngine.cjs');
 const PermissionAudit = require('../security/permissionAudit.cjs');
 const SecurityManager = require('../security/securityManager.cjs');
+const RuntimeKernel = require('../runtime/runtimeKernel.cjs');
 const Agent = require('../agent/agent.cjs');
 const AgentRegistry = require('../agent/agentRegistry.cjs');
 const AgentEngine = require('../agent/agentEngine.cjs');
@@ -2502,6 +2503,35 @@ class Repository {
   /** @type {SecurityManager} */
   get security() {
     return this._getSecurityManager();
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.10: Knowledge Runtime
+  // ──────────────────────────────────────
+
+  _getRuntime() {
+    if (!this._runtime) {
+      this._runtime = new RuntimeKernel({
+        db: this.db,
+        eventBus: this._eventBus,
+        security: this.security,
+        logger: this.logger
+      });
+    }
+    return this._runtime;
+  }
+
+  async initRuntimeSystem() {
+    const rt = this._getRuntime();
+    if (rt.state.status === 'created') {
+      await rt.start();
+    }
+    return rt;
+  }
+
+  /** @type {RuntimeKernel} */
+  get runtime() {
+    return this._getRuntime();
   }
 
   // ──────────────────────────────────────

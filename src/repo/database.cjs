@@ -324,6 +324,9 @@ class Database {
 
     // V22: Phase 6.9 Permission & Security System
     await this._migrateSecurityV22();
+
+    // V23: Phase 6.10 Knowledge Runtime
+    await this._migrateRuntimeV23();
   }
 
   run(sql, params = []) {
@@ -376,6 +379,51 @@ class Database {
         resolve();
       }
     });
+  }
+
+  /**
+   * V23: Phase 6.10 Knowledge Runtime
+   *   runtime_instances — Runtime 实例
+   *   runtime_events    — Runtime 事件
+   *   runtime_state     — 全局状态
+   */
+  async _migrateRuntimeV23() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS runtime_instances (
+          id TEXT PRIMARY KEY,
+          type TEXT,
+          state TEXT,
+          updated_at INTEGER,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS runtime_events (
+          id TEXT PRIMARY KEY,
+          runtime_id TEXT,
+          event TEXT,
+          payload TEXT DEFAULT '{}',
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_rte_runtime ON runtime_events(runtime_id)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_rte_created ON runtime_events(created_at)`);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS runtime_state (
+          key TEXT PRIMARY KEY,
+          value TEXT,
+          updated_at INTEGER
+        )
+      `);
+
+      console.log('[migrate] Runtime V23 ok');
+    } catch (e) {
+      console.error('[migrate] Runtime V23 失败:', e.message);
+    }
   }
 
   /**

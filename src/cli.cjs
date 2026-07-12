@@ -21,6 +21,7 @@ const unlink = require('./commands/unlink.cjs');
 const relationCmd = require('./commands/relation.cjs');
 const graphCmd = require('./commands/graph.cjs');
 const securityCmd = require('./commands/security.cjs');
+const runtimeCmd = require('./commands/runtime.cjs');
 const move = require('./commands/move.cjs');
 const backup = require('./commands/backup.cjs');
 const daily = require('./commands/daily.cjs');
@@ -939,6 +940,16 @@ cli
       .command('run', '执行自我改进循环', {}, graphCmd.evoRun)
       .command('history', '查看进化历史', {}, graphCmd.evoHistory)
       .demandCommand(1, '请指定 Evolution 子命令。可用: status, analyze, run, history');
+  })
+
+  .command('runtime', 'Knowledge Runtime（Phase 6.10）', (yargs) => {
+    yargs
+      .command('status', '查看 Runtime 状态', {}, runtimeCmd.runtimeStatus)
+      .command('start', '启动 Runtime', {}, runtimeCmd.runtimeStart)
+      .command('stop', '停止 Runtime', {}, runtimeCmd.runtimeStop)
+      .command('monitor', '监控面板', {}, runtimeCmd.runtimeMonitor)
+      .command('evolve', '知识演化建议', {}, runtimeCmd.runtimeEvolve)
+      .demandCommand(1, '请指定 Runtime 子命令。可用: status, start, stop, monitor, evolve');
   })
 
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
