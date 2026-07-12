@@ -55,6 +55,11 @@ const WorkflowScheduler = require('../workflow/workflowScheduler.cjs');
 const PermissionManager = require('../security/permissionManager.cjs');
 const PolicyEngine = require('../security/policyEngine.cjs');
 const PermissionAudit = require('../security/permissionAudit.cjs');
+const Agent = require('../agent/agent.cjs');
+const AgentRegistry = require('../agent/agentRegistry.cjs');
+const AgentEngine = require('../agent/agentEngine.cjs');
+const AgentStore = require('../agent/agentStore.cjs');
+const AgentScheduler = require('../agent/agentScheduler.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2463,6 +2468,118 @@ class Repository {
   async getDeniedPermissionStats() {
     const audit = new PermissionAudit(this.db);
     return audit.deniedStats();
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.5: Agent System
+  // ──────────────────────────────────────
+
+  _getAgentEngine() {
+    if (!this._agentEngine) {
+      const registry = new AgentRegistry();
+      const store = new AgentStore(this.db);
+
+      this._agentEngine = new AgentEngine({
+        registry,
+        store,
+        repository: this,
+        workflowEngine: this._getWorkflowEngine ? this._getWorkflowEngine() : null,
+        eventBus: this._getEventBus(),
+        logger: this.logger || console
+      });
+
+      this._agentScheduler = new AgentScheduler({
+        agentEngine: this._agentEngine,
+        eventBus: this._getEventBus(),
+        logger: this.logger || console
+      });
+    }
+    return this._agentEngine;
+  }
+
+  async initAgentSystem() {
+    const engine = this._getAgentEngine();
+
+    // 注册内置 Agent
+    if (engine.listAgents().length === 0) {
+      await this._registerBuiltinAgents();
+    }
+
+    // 启动调度器
+    this._agentScheduler.start();
+
+    return engine;
+  }
+
+  async _registerBuiltinAgents() {
+    const engine = this._getAgentEngine();
+
+    // Knowledge Reviewer — 周期检查遗忘/孤立/断裂
+    await engine.register(new Agent({
+      id: 'knowledge-reviewer',
+      name: 'Knowledge Reviewer',
+      type: 'maintenance',
+      description: '定期检查遗忘知识、孤立资源、断裂关系',
+      capabilities: ['knowledge.analyze', 'resource.inspect', 'suggestion.create'],
+      triggers: [{ type: 'schedule', schedule: { cron: 'weekly', time: '02:00' } }]
+    }));
+
+    // Knowledge Assistant — 资源创建时自动分析
+    await engine.register(new Agent({
+      id: 'knowledge-assistant',
+      name: 'Knowledge Assistant',
+      type: 'assistant',
+      description: '监听资源创建，自动提取摘要、推荐关系、生成标签',
+      capabilities: ['resource.inspect', 'suggestion.create', 'notification.send'],
+      triggers: [{ type: 'event', event: 'resource.created' }]
+    }));
+
+    // Research Agent — 知识缺口发现
+    await engine.register(new Agent({
+      id: 'research-agent',
+      name: 'Research Agent',
+      type: 'research',
+      description: '发现知识缺口，生成学习任务',
+      capabilities: ['knowledge.analyze', 'graph.query', 'suggestion.create'],
+      triggers: [{ type: 'schedule', schedule: { cron: 'daily', time: '09:00' } }]
+    }));
+  }
+
+  async registerAgent(def) {
+    const engine = this._getAgentEngine();
+    const agent = new Agent(def);
+    await engine.register(agent);
+    return agent.toJSON();
+  }
+
+  async listAgents() {
+    const engine = this._getAgentEngine();
+    return engine.listAgents();
+  }
+
+  async startAgent(id) {
+    const engine = this._getAgentEngine();
+    return engine.start(id);
+  }
+
+  async stopAgent(id) {
+    const engine = this._getAgentEngine();
+    return engine.stop(id);
+  }
+
+  async executeAgent(id, options) {
+    const engine = this._getAgentEngine();
+    return engine.execute(id, options);
+  }
+
+  async getAgentRuns(agentId, limit) {
+    const engine = this._getAgentEngine();
+    return engine.getRuns(agentId, limit);
+  }
+
+  async getAgentMemory(agentId, limit) {
+    const engine = this._getAgentEngine();
+    return engine.getMemory(agentId, limit);
   }
 
   async exportGraph(format = 'json', options = {}) {

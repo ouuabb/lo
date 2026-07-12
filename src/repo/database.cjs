@@ -309,6 +309,9 @@ class Database {
 
     // V17: permission system（Phase 6.4）
     await this._migratePermissionV17();
+
+    // V18: agent system（Phase 6.5）
+    await this._migrateAgentV18();
   }
 
   run(sql, params = []) {
@@ -1070,6 +1073,52 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_created ON permission_audit(created_at)`);
     } catch (e) {
       console.error('[migrate] Permission V17 失败:', e.message);
+    }
+  }
+
+  /**
+   * V18: Phase 6.5 Knowledge Agent System
+   *   agents        — Agent 定义
+   *   agent_runs    — 运行记录
+   *   agent_memory  — Agent 记忆
+   */
+  async _migrateAgentV18() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS agents (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          type TEXT,
+          status TEXT DEFAULT 'created',
+          config TEXT,
+          created_at INTEGER,
+          updated_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT,
+          status TEXT,
+          input TEXT,
+          output TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS agent_memory (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT,
+          type TEXT,
+          content TEXT,
+          created_at INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_agmem_agent ON agent_memory(agent_id)`);
+    } catch (e) {
+      console.error('[migrate] Agent V18 失败:', e.message);
     }
   }
 

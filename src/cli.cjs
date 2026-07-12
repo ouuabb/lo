@@ -847,6 +847,23 @@ cli
       .demandCommand(1, '请指定权限子命令。可用: role, check, grant, audit');
   })
 
+  .command('agent', '知识智能体（Phase 6.5）', (yargs) => {
+    yargs
+      .command('list', '列出 Agent', {}, graphCmd.agentList)
+      .command('info <id>', 'Agent 详情', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Agent ID' });
+      }, graphCmd.agentInfo)
+      .command('run <id>', '执行 Agent', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Agent ID' });
+        yargs.option('goal', { type: 'string', description: '执行目标' });
+      }, graphCmd.agentRun)
+      .command('memory <id>', '查看 Agent 记忆', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Agent ID' });
+        yargs.option('limit', { type: 'number', description: '数量限制', default: 10 });
+      }, graphCmd.agentMemory)
+      .demandCommand(1, '请指定 Agent 子命令。可用: list, info, run, memory');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {

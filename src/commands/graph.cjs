@@ -2102,6 +2102,159 @@ async function permissionGrantHandler(argv) {
   }
 }
 
+// ═══════════ Phase 6.5: Agent Handlers ═══════════
+
+/**
+ * lo agent list
+ */
+async function agentListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAgentSystem();
+
+    const agents = await repo.listAgents();
+
+    console.log(chalk.bold.cyan('\n  Knowledge Agents'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (agents.length === 0) {
+      console.log(chalk.gray('  No agents registered.'));
+    } else {
+      for (const a of agents) {
+        const statusIcon = a.status === 'initialized' ? chalk.green('active') :
+                           a.status === 'disabled' ? chalk.red('disabled') : chalk.yellow(a.status);
+        console.log(`  ${chalk.cyan(a.id.padEnd(28))}  ${chalk.yellow(a.type.padEnd(14))}  ${chalk.gray(String(a.capabilityCount).padStart(2))} caps  ${statusIcon}`);
+        if (a.description) console.log(`    ${chalk.gray(a.description)}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`Agent 列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo agent info <id>
+ */
+async function agentInfoHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAgentSystem();
+
+    const agents = await repo.listAgents();
+    const agent = agents.find(a => a.id === argv.id);
+
+    if (!agent) {
+      console.log(chalk.yellow(`\n  Agent '${argv.id}' not found.\n`));
+    } else {
+      console.log(chalk.bold.cyan(`\n  Agent: ${argv.id}`));
+      console.log(chalk.gray('  ───────────────────────────────\n'));
+      console.log(`  ${chalk.cyan('Name:')}         ${agent.name}`);
+      console.log(`  ${chalk.cyan('Type:')}         ${agent.type}`);
+      console.log(`  ${chalk.cyan('Status:')}       ${agent.status}`);
+      console.log(`  ${chalk.cyan('Caps:')}         ${agent.capabilityCount}`);
+      if (agent.description) console.log(`  ${chalk.cyan('Desc:')}         ${agent.description}`);
+
+      // 查看最近记忆
+      try {
+        const mem = await repo.getAgentMemory(argv.id, 5);
+        if (mem.length > 0) {
+          console.log(`\n  ${chalk.cyan('Recent Memory:')}`);
+          for (const m of mem.slice(0, 3)) {
+            console.log(`    [${m.type}] ${new Date(m.createdAt).toLocaleString()}`);
+          }
+        }
+      } catch {}
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`Agent 信息失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo agent run <id>
+ */
+async function agentRunHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAgentSystem();
+
+    const result = await repo.executeAgent(argv.id, { goal: argv.goal || null });
+
+    console.log(chalk.bold.cyan('\n  Agent Execution'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Agent:')}   ${result.agentId}`);
+    console.log(`  ${chalk.cyan('Goal:')}    ${result.goal}`);
+    console.log(`  ${chalk.cyan('Plan:')}    ${JSON.stringify(result.plan)}`);
+    console.log(`  ${chalk.cyan('Result:')}  ${result.result.success ? chalk.green('success') : chalk.red('failed')}`);
+
+    if (result.result.success) {
+      console.log(`  ${chalk.cyan('Steps:')}   ${result.result.steps}`);
+    } else {
+      console.log(`  ${chalk.cyan('Error:')}   ${result.result.error || 'unknown'}`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`Agent 执行失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo agent memory <id>
+ */
+async function agentMemoryHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAgentSystem();
+
+    const memory = await repo.getAgentMemory(argv.id, argv.limit || 10);
+
+    console.log(chalk.bold.cyan(`\n  Agent Memory: ${argv.id}`));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (memory.length === 0) {
+      console.log(chalk.gray('  No memory records.'));
+    } else {
+      for (const m of memory) {
+        const typeIcon = m.type === 'observation' ? chalk.yellow('👁') :
+                         m.type === 'decision' ? chalk.magenta('🧠') :
+                         m.type === 'action' ? chalk.green('▶') :
+                         chalk.blue('📋');
+        const time = new Date(m.createdAt).toLocaleString();
+        console.log(`  ${typeIcon} ${chalk.gray(time)}  [${m.type}]`);
+        if (m.content) {
+          const summary = typeof m.content === 'object' ? JSON.stringify(m.content).slice(0, 80) : String(m.content).slice(0, 80);
+          console.log(`    ${chalk.gray(summary)}`);
+        }
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`Agent 记忆查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -2158,5 +2311,9 @@ module.exports = {
   permissionRoleList: permissionRoleListHandler,
   permissionCheck: permissionCheckHandler,
   permissionAudit: permissionAuditHandler,
-  permissionGrant: permissionGrantHandler
+  permissionGrant: permissionGrantHandler,
+  agentList: agentListHandler,
+  agentInfo: agentInfoHandler,
+  agentRun: agentRunHandler,
+  agentMemory: agentMemoryHandler
 };
