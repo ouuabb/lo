@@ -12,6 +12,13 @@ const SyncRemote = require('../utils/syncRemote.cjs');
 const { resolveRemote } = require('./remote.cjs');
 
 // ---------------------------------------------------------------------------
+// Project root & admin SPA config
+// ---------------------------------------------------------------------------
+
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const ADMIN_DIST = path.join(PROJECT_ROOT, 'admin', 'dist');
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -205,10 +212,10 @@ const pendingChallenges = new Map();
 const SESSION_TTL_MS = 60 * 60 * 1000;    // session 有效期 60 分钟
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;    // 挑战有效期 5 分钟
 
-function createSession(fingerprint, label) {
+function createSession(user, label) {
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, {
-    fingerprint,
+    user,
     label,
     expiresAt: Date.now() + SESSION_TTL_MS
   });
@@ -622,6 +629,1063 @@ route('POST', '/api/sync/pull', async (req, res, { repo }) => {
   }
 });
 
+// ---- Admin API 端点（本地无需认证，监听 127.0.0.1）------------------
+
+route('GET', '/api/admin/stats', async (req, res, { repo }) => {
+
+  try {
+    const stats = await repo.getStats();
+
+    // suggestions 数量
+    let suggestionCount = 0;
+    try {
+      const row = await repo.db.get('SELECT COUNT(*) as c FROM ai_suggestions');
+      suggestionCount = row ? row.c : 0;
+    } catch {}
+
+    // containers 数量
+    let containerCount = 0;
+    try {
+      const row = await repo.db.get("SELECT COUNT(*) as c FROM resources WHERE type = 'container' AND deleted = 0");
+      containerCount = row ? row.c : 0;
+    } catch {}
+
+    // tags/categories（从 metadata 提取）
+    const allResources = await repo.getAllResources();
+    const tagSet = new Set();
+    const categorySet = new Set();
+    for (const r of allResources) {
+      const md = r.metadata || {};
+      if (Array.isArray(md.tags)) md.tags.forEach(t => tagSet.add(t));
+      if (md.category) categorySet.add(md.category);
+    }
+
+    // agents 数量
+    let agentCount = 0;
+    try { agentCount = (await repo.listAgents()).length; } catch {}
+
+    // workflows 数量
+    let workflowCount = 0;
+    try { workflowCount = (await repo.listWorkflows()).length; } catch {}
+
+    jsonOk(res, {
+      resources: stats.totalResources,
+      relations: stats.totalRelations,
+      tags: tagSet.size,
+      categories: categorySet.size,
+      suggestions: suggestionCount,
+      containers: containerCount,
+      agents: agentCount,
+      workflows: workflowCount
+    });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/resources', async (req, res, { repo, url }) => {
+
+  try {
+    const q = url.searchParams.get('q') || '';
+    const type = url.searchParams.get('type') || null;
+    const limit = parseInt(url.searchParams.get('limit')) || 50;
+    const offset = parseInt(url.searchParams.get('offset')) || 0;
+
+    let resources = await repo.getAllResources({ type, limit, offset });
+
+    // 过滤内部系统资源
+    resources = resources.filter(r => r.rid !== '__system__');
+
+    // 如果指定了搜索关键词，按 title 过滤
+    if (q) {
+      const lowerQ = q.toLowerCase();
+      resources = resources.filter(r => {
+        const title = (r.metadata && r.metadata.title) || r.name || '';
+        return title.toLowerCase().includes(lowerQ);
+      });
+    }
+
+    jsonOk(res, {
+      total: resources.length,
+      limit,
+      offset,
+      data: resources
+    });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/resources/:rid', async (req, res, { repo, url }) => {
+
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  try {
+    const resource = await repo.getResource(rid);
+    if (!resource) return notFound(res, 'Resource not found');
+
+    // 读取内容（加密资源用占位文本）
+    let content = null;
+    try {
+      if (resource.path && await fs.pathExists(resource.path)) {
+        content = await readResourceContent(resource.path, repo.cryptoKey);
+      }
+    } catch {
+      content = '[加密内容]';
+    }
+
+    // 获取该资源的所有关系
+    let relations = { outgoing: [], incoming: [] };
+    try {
+      relations = await repo.getRelations(rid);
+    } catch {}
+
+    // 获取标签
+    const tags = (resource.metadata && resource.metadata.tags) || [];
+
+    jsonOk(res, {
+      ...resource,
+      content: content || resource.content || null,
+      relations,
+      tags
+    });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/graph', async (req, res, { repo, url }) => {
+
+  try {
+    const limit = parseInt(url.searchParams.get('limit')) || 200;
+
+    // 获取节点
+    const resources = await repo.db.all(
+      'SELECT rid, type, name, metadata FROM resources WHERE deleted = 0 LIMIT ?',
+      [limit]
+    );
+
+    const nodes = resources.map(r => ({
+      id: r.rid,
+      type: r.type,
+      label: (() => { try { const m = JSON.parse(r.metadata || '{}'); return m.title || r.name || r.rid; } catch { return r.name || r.rid; } })(),
+      resourceType: r.type
+    }));
+
+    // 获取边
+    const rels = await repo.db.all(
+      'SELECT id, from_rid, to_rid, type, metadata FROM relations WHERE deleted = 0 LIMIT ?',
+      [limit]
+    );
+
+    const edges = rels.map(r => {
+      let label = '';
+      try { const m = JSON.parse(r.metadata || '{}'); label = m.label || m.title || ''; } catch {}
+      return {
+        id: r.id,
+        from: r.from_rid,
+        to: r.to_rid,
+        type: r.type,
+        label
+      };
+    });
+
+    jsonOk(res, { nodes, edges });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/graph/path', async (req, res, { repo, url }) => {
+
+  const fromRid = url.searchParams.get('from');
+  const toRid = url.searchParams.get('to');
+
+  if (!fromRid || !toRid) {
+    return badRequest(res, '缺少 from 或 to 参数');
+  }
+
+  try {
+    if (typeof repo.findPath !== 'function') {
+      return jsonOk(res, { error: 'not implemented' }, 501);
+    }
+
+    const fromRes = await repo.getResource(fromRid);
+    const toRes = await repo.getResource(toRid);
+
+    if (!fromRes || !toRes) {
+      return notFound(res, '源节点或目标节点不存在');
+    }
+
+    const result = await repo.findPath(fromRid, toRid);
+    if (!result) {
+      return jsonOk(res, { path: null, message: '无路径可达' });
+    }
+
+    jsonOk(res, { path: result.path, length: result.length });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/suggestions', async (req, res, { repo }) => {
+
+  try {
+    const suggestions = await repo.listSuggestions({ status: 'pending', limit: 100 });
+    jsonOk(res, { total: suggestions.length, data: suggestions });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('POST', '/api/admin/suggestions/:id/accept', async (req, res, { repo, url }) => {
+
+  const match = url.pathname.match(/^\/api\/admin\/suggestions\/([^/]+)\/accept$/);
+  if (!match) return notFound(res, 'Invalid suggestion id');
+
+  const id = match[1];
+
+  try {
+    const result = await repo.approveSuggestion(id);
+    jsonOk(res, result);
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/containers', async (req, res, { repo }) => {
+
+  try {
+    const containers = await repo.db.all(
+      "SELECT * FROM resources WHERE type = 'container' AND deleted = 0 ORDER BY created DESC"
+    );
+
+    const result = containers.map(r => ({
+      ...r,
+      metadata: (() => { try { return JSON.parse(r.metadata || '{}'); } catch { return {}; } })()
+    }));
+
+    jsonOk(res, { total: result.length, data: result });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/containers/:id', async (req, res, { repo, url }) => {
+
+  // 匹配 /api/admin/containers/:id
+  const match = url.pathname.match(/^\/api\/admin\/containers\/([^/]+)$/);
+  if (!match) return notFound(res, 'Invalid container id');
+
+  const containerId = match[1];
+
+  try {
+    // 先查找容器
+    let container = await repo.getResource(containerId);
+    if (!container) {
+      // 尝试用 name 找
+      container = await repo.db.get(
+        "SELECT * FROM resources WHERE (name = ? OR rid LIKE ?) AND type = 'container' AND deleted = 0",
+        [containerId, `%${containerId}%`]
+      );
+    }
+
+    if (!container) {
+      return notFound(res, 'Container not found');
+    }
+
+    // 获取成员
+    const members = await repo.db.all(
+      'SELECT * FROM container_members WHERE container_rid = ?',
+      [container.rid]
+    );
+
+    jsonOk(res, {
+      container,
+      members,
+      memberCount: members.length
+    });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/relations', async (req, res, { repo, url }) => {
+
+  try {
+    const rid = url.searchParams.get('rid') || null;
+    const type = url.searchParams.get('type') || null;
+    const limit = parseInt(url.searchParams.get('limit')) || 100;
+
+    let sql = 'SELECT * FROM relations WHERE deleted = 0';
+    const params = [];
+
+    if (rid) {
+      sql += ' AND (from_rid = ? OR to_rid = ?)';
+      params.push(rid, rid);
+    }
+    if (type) {
+      sql += ' AND type = ?';
+      params.push(type);
+    }
+
+    sql += ' ORDER BY created DESC LIMIT ?';
+    params.push(limit);
+
+    const relations = await repo.db.all(sql, params);
+
+    jsonOk(res, { total: relations.length, data: relations });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('DELETE', '/api/admin/relations/:id', async (req, res, { repo, url }) => {
+
+  const match = url.pathname.match(/^\/api\/admin\/relations\/(\d+)$/);
+  if (!match) return notFound(res, 'Invalid relation id');
+
+  const id = parseInt(match[1]);
+
+  try {
+    await repo.db.run('UPDATE relations SET deleted = 1 WHERE id = ?', [id]);
+    jsonOk(res, { ok: true, deleted: id });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('GET', '/api/admin/audit', async (req, res, { repo, url }) => {
+
+  try {
+    const limit = parseInt(url.searchParams.get('limit')) || 50;
+    const actor = url.searchParams.get('actor') || null;
+
+    const PermissionAudit = require('../security/permissionAudit.cjs');
+    const audit = new PermissionAudit(repo.db);
+    const options = { limit };
+    if (actor) options.subject = actor;
+
+    const results = await audit.query(options);
+
+    jsonOk(res, { total: results.length, data: results });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ===========================================================================
+// Admin CRUD 端点 — 资源的增删改查、关联、标签、提交
+// ===========================================================================
+
+// ---- 创建资源 ------------------------------------------------------------
+
+route('POST', '/api/admin/resources', async (req, res, { repo }) => {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { name, content, metadata } = body;
+  if (!name) return badRequest(res, '缺少 name 字段');
+
+  try {
+    // 只允许创建 note 类型，默认 .md 扩展名
+    const filename = name.endsWith('.md') ? name : `${name}.md`;
+    const filePath = path.join(repo.repoPath, filename);
+    const dir = path.dirname(filePath);
+    await fs.ensureDir(dir);
+
+    // 写入文件
+    await fs.writeFile(filePath, content || '', 'utf-8');
+
+    // 加密（如果仓库有密钥）
+    if (repo.cryptoKey) {
+      await repo.encryptFile(filePath);
+    }
+
+    // 创建资源记录
+    const resource = await repo.createResource('note', content || '', {
+      filename,
+      metadata: metadata || {}
+    });
+
+    jsonOk(res, resource, 201);
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 导入文件 ------------------------------------------------------------
+
+route('POST', '/api/admin/import', async (req, res, { repo }) => {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { paths } = body;
+  if (!paths || !Array.isArray(paths) || paths.length === 0) {
+    return badRequest(res, '缺少 paths 字段（字符串数组）');
+  }
+
+  const ResourceType = require('../utils/resourceType.cjs');
+  const results = { imported: [], failed: [] };
+
+  for (const srcPath of paths) {
+    try {
+      if (!await fs.pathExists(srcPath)) {
+        results.failed.push({ path: srcPath, error: '文件不存在' });
+        continue;
+      }
+
+      const stats = await fs.stat(srcPath);
+      if (stats.isDirectory()) {
+        results.failed.push({ path: srcPath, error: '暂不支持导入目录' });
+        continue;
+      }
+
+      const basename = path.basename(srcPath);
+      const destPath = path.join(repo.repoPath, basename);
+
+      // 如果目标已存在，加后缀
+      let finalPath = destPath;
+      if (await fs.pathExists(destPath)) {
+        const ext = path.extname(basename);
+        const stem = basename.slice(0, -ext.length);
+        finalPath = path.join(repo.repoPath, `${stem}-${Date.now()}${ext}`);
+      }
+
+      // 复制文件
+      await fs.copy(srcPath, finalPath);
+
+      // 导入到知识库
+      const resource = await repo.importFile(finalPath);
+      results.imported.push(resource);
+    } catch (e) {
+      results.failed.push({ path: srcPath, error: e.message });
+    }
+  }
+
+  jsonOk(res, results);
+});
+
+// ---- 更新资源内容 --------------------------------------------------------
+
+route('PUT', '/api/admin/resources/:rid', async (req, res, { repo, url }) => {
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { content, metadata, name } = body;
+
+  try {
+    const resource = await repo.getResource(rid);
+    if (!resource) return notFound(res, 'Resource not found');
+
+    // 更新文件内容
+    if (content !== undefined && resource.path) {
+      const filePath = path.join(repo.repoPath, resource.path);
+      await fs.writeFile(filePath, content, 'utf-8');
+      if (repo.cryptoKey) {
+        await repo.encryptFile(filePath);
+      }
+      await repo.resourceService.refresh(rid);
+    }
+
+    // 更新元数据
+    if (metadata !== undefined || name !== undefined) {
+      const updates = {};
+      if (metadata !== undefined) updates.metadata = metadata;
+      if (name !== undefined) {
+        const newPath = `resources/${name}`;
+        updates.path = newPath;
+      }
+      await repo.updateResource(rid, updates);
+    }
+
+    const updated = await repo.getResource(rid);
+    jsonOk(res, updated);
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 删除资源 ------------------------------------------------------------
+
+route('DELETE', '/api/admin/resources/:rid', async (req, res, { repo, url }) => {
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  const hard = url.searchParams.get('hard') === 'true';
+
+  try {
+    await repo.deleteResource(rid, !hard);
+    jsonOk(res, { ok: true, rid, hard });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 关联资源 ------------------------------------------------------------
+
+route('POST', '/api/admin/resources/:rid/link', async (req, res, { repo, url }) => {
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { target, type = 'reference' } = body;
+  if (!target) return badRequest(res, '缺少 target 字段');
+
+  try {
+    await repo.linkResources(rid, target, type);
+    jsonOk(res, { ok: true, from: rid, to: target, type });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 解除关联 ------------------------------------------------------------
+
+route('DELETE', '/api/admin/resources/:rid/link/:target', async (req, res, { repo, url }) => {
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  const target = decodeURIComponent(url.pathname.split('/link/')[1] || '');
+  if (!target) return notFound(res, 'Invalid target');
+
+  const type = url.searchParams.get('type') || 'reference';
+
+  try {
+    await repo.unlinkResources(rid, target, type);
+    jsonOk(res, { ok: true, from: rid, to: target, type });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 更新资源标签 --------------------------------------------------------
+
+route('PUT', '/api/admin/resources/:rid/tags', async (req, res, { repo, url }) => {
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { tags } = body;
+  if (!Array.isArray(tags)) return badRequest(res, 'tags 必须是数组');
+
+  try {
+    const resource = await repo.getResource(rid);
+    if (!resource) return notFound(res, 'Resource not found');
+
+    const metadata = { ...(resource.metadata || {}), tags };
+    await repo.updateResource(rid, { metadata });
+
+    jsonOk(res, { ok: true, rid, tags });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 删除单个标签 --------------------------------------------------------
+
+route('DELETE', '/api/admin/resources/:rid/tags/:tag', async (req, res, { repo, url }) => {
+  const rid = extractAdminRid(url.pathname);
+  if (!rid) return notFound(res, 'Invalid rid');
+
+  const tag = decodeURIComponent(url.pathname.split('/tags/')[1] || '');
+  if (!tag) return notFound(res, 'Invalid tag');
+
+  try {
+    const resource = await repo.getResource(rid);
+    if (!resource) return notFound(res, 'Resource not found');
+
+    const tags = (resource.metadata && resource.metadata.tags) || [];
+    const newTags = tags.filter(t => t !== tag);
+    const metadata = { ...(resource.metadata || {}), tags: newTags };
+    await repo.updateResource(rid, { metadata });
+
+    jsonOk(res, { ok: true, rid, tag: tag, tags: newTags });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 提交变更 ------------------------------------------------------------
+
+route('POST', '/api/admin/commit', async (req, res, { repo }) => {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { message } = body;
+  if (!message) return badRequest(res, '缺少 message 字段');
+
+  try {
+    // 使用 StagingArea 提交当前暂存的变更
+    const StagingArea = require('../repo/staging.cjs');
+    const staging = new StagingArea(repo.repoPath);
+
+    if (!(await staging.hasChanges())) {
+      return jsonOk(res, { error: '没有待提交的变更' }, 400);
+    }
+
+    const stagingResult = await staging.commit(repo);
+    await repo.commit(message, stagingResult);
+    await repo.createCommit(message);
+    await repo.sync({ silent: true });
+
+    jsonOk(res, { ok: true, message, result: stagingResult });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 工作区状态 ----------------------------------------------------------
+
+route('GET', '/api/admin/status', async (req, res, { repo }) => {
+  try {
+    const StagingArea = require('../repo/staging.cjs');
+    const staging = new StagingArea(repo.repoPath);
+
+    const status = await staging.getStatus();
+    const commits = await repo.getCommitLog();
+
+    jsonOk(res, {
+      staged: {
+        added: status.added || [],
+        modified: status.modified || [],
+        deleted: status.deleted || [],
+        renamed: status.renamed || [],
+        metadata: status.metadata || []
+      },
+      recentCommits: commits.slice ? commits.slice(0, 10) : []
+    });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 拒绝建议 ------------------------------------------------------------
+
+route('POST', '/api/admin/suggestions/:id/reject', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/suggestions\/([^/]+)\/reject$/);
+  if (!match) return notFound(res, 'Invalid suggestion id');
+
+  const id = match[1];
+
+  try {
+    await repo.rejectSuggestion(id);
+    jsonOk(res, { ok: true, id, status: 'rejected' });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 执行已通过建议 ------------------------------------------------------
+
+route('POST', '/api/admin/suggestions/:id/execute', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/suggestions\/([^/]+)\/execute$/);
+  if (!match) return notFound(res, 'Invalid suggestion id');
+
+  const id = match[1];
+
+  try {
+    const result = await repo.executeApprovedSuggestion(id);
+    jsonOk(res, { ok: true, id, result });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 扫描容器 ------------------------------------------------------------
+
+route('POST', '/api/admin/containers/:id/scan', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/containers\/([^/]+)\/scan$/);
+  if (!match) return notFound(res, 'Invalid container id');
+
+  const containerId = match[1];
+
+  try {
+    const container = await repo.getResource(containerId);
+    if (!container) return notFound(res, 'Container not found');
+
+    const result = await repo.scanContainerMembers(container.rid);
+    jsonOk(res, { ok: true, container: container.rid, result });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 升级容器成员 --------------------------------------------------------
+
+route('POST', '/api/admin/containers/:id/members/promote', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/containers\/([^/]+)\/members\/promote$/);
+  if (!match) return notFound(res, 'Invalid container id');
+
+  const containerId = match[1];
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { memberPath } = body;
+  if (!memberPath) return badRequest(res, '缺少 memberPath 字段');
+
+  try {
+    const container = await repo.getResource(containerId);
+    if (!container) return notFound(res, 'Container not found');
+
+    const result = await repo.promoteMember(container.rid, memberPath, {
+      type: body.type || 'note'
+    });
+
+    jsonOk(res, { ok: true, result });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 降级容器成员 --------------------------------------------------------
+
+route('POST', '/api/admin/containers/:id/members/demote', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/containers\/([^/]+)\/members\/demote$/);
+  if (!match) return notFound(res, 'Invalid container id');
+
+  const containerId = match[1];
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { memberPath } = body;
+  if (!memberPath) return badRequest(res, '缺少 memberPath 字段');
+
+  try {
+    const container = await repo.getResource(containerId);
+    if (!container) return notFound(res, 'Container not found');
+
+    const result = await repo.demoteMember(container.rid, memberPath);
+    jsonOk(res, { ok: true, result });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 仓库类型管理 --------------------------------------------------------
+
+route('GET', '/api/admin/types', async (req, res, { repo }) => {
+  try {
+    const types = await repo.db.all(
+      "SELECT type, COUNT(*) as count FROM resources WHERE deleted = 0 AND type != 'system' GROUP BY type ORDER BY count DESC"
+    );
+    jsonOk(res, { data: types });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('PUT', '/api/admin/types/:name', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/types\/(.+)$/);
+  if (!match) return notFound(res, 'Invalid type name');
+
+  const oldType = decodeURIComponent(match[1]);
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
+
+  const { newType } = body;
+  if (!newType) return badRequest(res, '缺少 newType 字段');
+
+  try {
+    const result = await repo.db.run(
+      'UPDATE resources SET type = ? WHERE type = ? AND deleted = 0',
+      [newType, oldType]
+    );
+    jsonOk(res, { ok: true, oldType, newType, affected: result.changes });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 标签管理 ------------------------------------------------------------
+
+route('GET', '/api/admin/tags', async (req, res, { repo }) => {
+  try {
+    const rows = await repo.db.all(
+      "SELECT metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+    );
+    const tagCounts = {};
+    for (const row of rows) {
+      try {
+        const m = JSON.parse(row.metadata || '{}');
+        const tags = Array.isArray(m.tags) ? m.tags : [];
+        for (const t of tags) {
+          if (t && t.trim()) tagCounts[t] = (tagCounts[t] || 0) + 1;
+        }
+      } catch {}
+    }
+    const data = Object.entries(tagCounts)
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+    jsonOk(res, { data });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('PUT', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/tags\/(.+)$/);
+  if (!match) return notFound(res, 'Invalid tag name');
+  const oldTag = decodeURIComponent(match[1]);
+
+  let body;
+  try { body = await readBody(req); } catch (e) { return badRequest(res, e.message); }
+  const { newTag } = body;
+  if (!newTag) return badRequest(res, '缺少 newTag 字段');
+
+  try {
+    const rows = await repo.db.all(
+      "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+    );
+    let affected = 0;
+    for (const row of rows) {
+      try {
+        const m = JSON.parse(row.metadata || '{}');
+        const tags = Array.isArray(m.tags) ? m.tags : [];
+        if (tags.includes(oldTag)) {
+          const newTags = tags.map(t => t === oldTag ? newTag : t);
+          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?', [JSON.stringify({ ...m, tags: newTags }), row.rid]);
+          affected++;
+        }
+      } catch {}
+    }
+    jsonOk(res, { ok: true, oldTag, newTag, affected });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('DELETE', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/tags\/(.+)$/);
+  if (!match) return notFound(res, 'Invalid tag name');
+  const tag = decodeURIComponent(match[1]);
+
+  try {
+    const rows = await repo.db.all(
+      "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+    );
+    let affected = 0;
+    for (const row of rows) {
+      try {
+        const m = JSON.parse(row.metadata || '{}');
+        const tags = Array.isArray(m.tags) ? m.tags : [];
+        if (tags.includes(tag)) {
+          const newTags = tags.filter(t => t !== tag);
+          await repo.db.run('UPDATE resources SET metadata = ? WHERE rid = ?', [JSON.stringify({ ...m, tags: newTags }), row.rid]);
+          affected++;
+        }
+      } catch {}
+    }
+    jsonOk(res, { ok: true, tag, affected });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ---- 分类管理 ------------------------------------------------------------
+
+route('GET', '/api/admin/categories', async (req, res, { repo }) => {
+  try {
+    const rows = await repo.db.all(
+      "SELECT metadata FROM resources WHERE deleted = 0 AND type != 'system'"
+    );
+    const catCounts = {};
+    for (const row of rows) {
+      try {
+        const m = JSON.parse(row.metadata || '{}');
+        const cat = m.category;
+        if (cat && cat.trim()) {
+          catCounts[cat] = (catCounts[cat] || 0) + 1;
+        }
+      } catch {}
+    }
+    const data = Object.entries(catCounts)
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => a.category.localeCompare(b.category));
+    jsonOk(res, { data });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('PUT', '/api/admin/categories/:name', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/categories\/(.+)$/);
+  if (!match) return notFound(res, 'Invalid category');
+  const oldCat = decodeURIComponent(match[1]);
+
+  let body;
+  try { body = await readBody(req); } catch (e) { return badRequest(res, e.message); }
+  const { newCategory } = body;
+  if (!newCategory) return badRequest(res, '缺少 newCategory 字段');
+
+  try {
+    const result = await repo.db.run(
+      "UPDATE resources SET metadata = json_set(metadata, '$.category', ?) WHERE json_extract(metadata, '$.category') = ? AND deleted = 0 AND type != 'system'",
+      [newCategory, oldCat]
+    );
+    jsonOk(res, { ok: true, oldCategory: oldCat, newCategory, affected: result.changes });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+route('DELETE', '/api/admin/categories/:name', async (req, res, { repo, url }) => {
+  const match = url.pathname.match(/^\/api\/admin\/categories\/(.+)$/);
+  if (!match) return notFound(res, 'Invalid category');
+  const cat = decodeURIComponent(match[1]);
+
+  try {
+    const result = await repo.db.run(
+      "UPDATE resources SET metadata = json_set(metadata, '$.category', '') WHERE json_extract(metadata, '$.category') = ? AND deleted = 0 AND type != 'system'",
+      [cat]
+    );
+    jsonOk(res, { ok: true, category: cat, affected: result.changes });
+  } catch (e) {
+    serverError(res, e.message);
+  }
+});
+
+// ===========================================================================
+// 辅助函数
+// ===========================================================================
+
+function extractAdminRid(urlPath) {
+  const match = urlPath.match(/^\/api\/admin\/resources\/(res_[a-zA-Z0-9_]+)/);
+  return match ? match[1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// 静态文件服务（Admin SPA）
+// ---------------------------------------------------------------------------
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.map': 'application/json',
+  '.txt': 'text/plain; charset=utf-8'
+};
+
+function getContentType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_TYPES[ext] || 'application/octet-stream';
+}
+
+/**
+ * 提供 admin SPA 静态文件
+ */
+async function serveAdminStatic(req, res, urlPath) {
+  // 去掉 /admin 前缀
+  let relativePath = urlPath.replace(/^\/admin\/?/, '');
+  if (!relativePath || relativePath === '/') relativePath = 'index.html';
+
+  // 安全检查：防止路径穿越
+  const safePath = path.normalize(relativePath).replace(/^(\.\.[\/\\])+/, '');
+  const filePath = path.join(ADMIN_DIST, safePath);
+
+  // 确保文件在 admin/dist 内
+  if (!filePath.startsWith(ADMIN_DIST)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  try {
+    const stat = await fs.stat(filePath);
+
+    if (stat.isDirectory()) {
+      // 目录 → index.html（SPA fallback）
+      return serveAdminStatic(req, res, '/admin/index.html');
+    }
+
+    const content = await fs.readFile(filePath);
+    const contentType = getContentType(filePath);
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': content.length,
+      'Cache-Control': 'no-cache'
+    });
+    res.end(content);
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      // 文件不存在 → SPA fallback 到 index.html
+      try {
+        const indexPath = path.join(ADMIN_DIST, 'index.html');
+        const content = await fs.readFile(indexPath);
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': content.length,
+          'Cache-Control': 'no-cache'
+        });
+        res.end(content);
+      } catch {
+        notFound(res, 'Admin SPA not built. Run the admin build first.');
+      }
+    } else {
+      serverError(res, `Failed to read file: ${e.message}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 路由匹配
 // ---------------------------------------------------------------------------
@@ -632,8 +1696,29 @@ function matchRoute(method, pathname) {
 
   if (map.has(pathname)) return map.get(pathname);
 
+  // 参数化路由匹配
   if (pathname.startsWith('/api/notes/') && pathname.split('/').length === 4) {
     const exactKey = '/api/notes/:rid';
+    if (map.has(exactKey)) return map.get(exactKey);
+  }
+
+  if (pathname.startsWith('/api/admin/resources/') && pathname.split('/').length === 5) {
+    const exactKey = '/api/admin/resources/:rid';
+    if (map.has(exactKey)) return map.get(exactKey);
+  }
+
+  if (/^\/api\/admin\/suggestions\/[^/]+\/accept$/.test(pathname)) {
+    const exactKey = '/api/admin/suggestions/:id/accept';
+    if (map.has(exactKey)) return map.get(exactKey);
+  }
+
+  if (/^\/api\/admin\/containers\/[^/]+$/.test(pathname)) {
+    const exactKey = '/api/admin/containers/:id';
+    if (map.has(exactKey)) return map.get(exactKey);
+  }
+
+  if (/^\/api\/admin\/relations\/\d+$/.test(pathname)) {
+    const exactKey = '/api/admin/relations/:id';
     if (map.has(exactKey)) return map.get(exactKey);
   }
 
@@ -648,6 +1733,7 @@ module.exports = async function serve(argv) {
   const repoPath = path.resolve(argv.repo || process.cwd());
   const port = parseInt(argv.port) || 8765;
   const host = '127.0.0.1';
+  const serveSpa = argv.serveSpa === true;
 
   // 打开仓库
   const repo = new Repository(repoPath);
@@ -705,8 +1791,38 @@ module.exports = async function serve(argv) {
       return;
     }
 
-    // 鉴权：/api/auth/* 不需要认证，其余接口需要
-    const isAuthEndpoint = pathname === '/api/auth/challenge' || pathname === '/api/auth/login' || pathname === '/api/auth/reload';
+    // 静态文件服务：/admin/* → admin/dist/ (SPA 模式)
+    if (serveSpa && pathname.startsWith('/admin/') && !pathname.startsWith('/api/admin/')) {
+      return serveAdminStatic(req, res, pathname);
+    }
+
+    // 鉴权：
+    // - /api/admin/* 无需认证（监听 127.0.0.1）
+    // - /api/auth/* 不需要认证（SSH）
+    // - 其余接口需要 SSH 认证
+    const isAdminEndpoint = pathname.startsWith('/api/admin/');
+    const isAuthEndpoint = pathname === '/api/auth/challenge'
+      || pathname === '/api/auth/login'
+      || pathname === '/api/auth/reload';
+
+    // Admin 端点：本地无需认证（监听 127.0.0.1）
+    if (isAdminEndpoint) {
+      const handler = matchRoute(method, pathname);
+      if (!handler) {
+        return notFound(res, `No route for ${method} ${pathname}`);
+      }
+
+      const ctx = { repo, url, authState, reloadKeys };
+
+      if (['POST', 'PUT', 'DELETE'].includes(method) && !isAdminAuthEndpoint) {
+        withWriteLock(() => handler(req, res, ctx));
+      } else {
+        handler(req, res, ctx).catch((e) => {
+          if (!res.headersSent) serverError(res, e.message);
+        });
+      }
+      return;
+    }
 
     if (authState.needAuth && !isAuthEndpoint) {
       const authHeader = req.headers['authorization'] || '';
@@ -752,8 +1868,13 @@ module.exports = async function serve(argv) {
   await new Promise((resolve) => server.listen(port, host, resolve));
 
   // 启动信息
-  console.log(chalk.green(`\n  lo serve 已启动`));
-  console.log(chalk.gray(`  地址: http://${host}:${port}`));
+  if (serveSpa) {
+    console.log(chalk.green(`\n  lo admin 已启动`));
+    console.log(chalk.gray(`  地址: http://${host}:${port}/admin/`));
+  } else {
+    console.log(chalk.green(`\n  lo serve 已启动`));
+    console.log(chalk.gray(`  地址: http://${host}:${port}`));
+  }
   console.log(chalk.gray(`  仓库: ${repoPath}`));
 
   if (authState.needAuth) {
@@ -766,8 +1887,36 @@ module.exports = async function serve(argv) {
     console.log(chalk.gray(`  任何本机程序均可调用 API，建议运行 lo auth add 注册密钥`));
   }
 
+  if (serveSpa) {
+    console.log(chalk.gray(`  Admin API: /api/admin/*（独立密码认证）`));
+  }
+
   console.log(chalk.gray(`  按 Ctrl+C 停止`));
   console.log('');
+
+  // SPA 模式：自动打开浏览器
+  if (serveSpa) {
+    const adminUrl = `http://${host}:${port}/admin/`;
+    try {
+      const { exec } = require('child_process');
+      const platform = process.platform;
+      let cmd;
+      if (platform === 'darwin') {
+        cmd = `open "${adminUrl}"`;
+      } else if (platform === 'win32') {
+        cmd = `start "" "${adminUrl}"`;
+      } else {
+        cmd = `xdg-open "${adminUrl}"`;
+      }
+      exec(cmd, (err) => {
+        if (err) {
+          console.log(chalk.gray(`  请手动打开浏览器访问: ${adminUrl}`));
+        }
+      });
+    } catch {
+      console.log(chalk.gray(`  请手动打开浏览器访问: ${adminUrl}`));
+    }
+  }
 
   // 优雅关闭
   const shutdown = async () => {

@@ -312,7 +312,7 @@ class ResourceService {
   }
 
   async update(rid, updates) {
-    const { path, hash, metadata, capabilities, container_schema } = updates;
+    const { path, hash, metadata, capabilities, container_schema, type } = updates;
     
     let sql = 'UPDATE resources SET updated = ?';
     const params = [Date.now()];
@@ -341,6 +341,11 @@ class ResourceService {
     if (container_schema !== undefined) {
       sql += ', container_schema = ?';
       params.push(JSON.stringify(container_schema));
+    }
+
+    if (type !== undefined) {
+      sql += ', type = ?';
+      params.push(type);
     }
     
     sql += ' WHERE rid = ? AND deleted = 0';

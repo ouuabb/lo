@@ -2735,7 +2735,17 @@ async function evoHistoryHandler() {
   }
 }
 
+/**
+ * lo admin — 启动管理后台（lo serve + SPA）
+ */
+async function adminHandler(argv) {
+  const port = argv.port || 8765;
+  const serve = require('./serve.cjs');
+  await serve({ repo: argv.repo || process.cwd(), port, serveSpa: true });
+}
+
 module.exports = {
+  admin: adminHandler,
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
   path: pathHandler,

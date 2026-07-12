@@ -4,3 +4,4 @@ backups/
 .DS_Store
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+admin/dist/

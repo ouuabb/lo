@@ -1270,6 +1270,22 @@ cli
       });
   }, serve)
 
+  .command('admin', '启动管理后台（lo serve + Admin SPA）', (yargs) => {
+    yargs
+      .option('port', {
+        type: 'number',
+        alias: 'p',
+        description: '监听端口',
+        default: 8765
+      })
+      .option('repo', {
+        type: 'string',
+        alias: 'r',
+        description: '仓库路径',
+        default: process.cwd()
+      });
+  }, graphCmd.admin)
+
   .command('operation', '操作管理', (yargs) => {
     yargs
       .command('types', '列出所有已注册的操作类型', {}, async (argv) => {
