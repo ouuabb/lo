@@ -1345,6 +1345,188 @@ async function graphQueryFederatedHandler(argv) {
   }
 }
 
+// ═══════════ Phase 5.11: Knowledge Evolution Handlers ═══════════
+
+/**
+ * lo knowledge evolution
+ */
+async function knowledgeEvolutionHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.analyzeEvolution({ period: 30 });
+
+    console.log(chalk.bold.cyan('\n  Knowledge Evolution'));
+    console.log(chalk.gray('  ───────────────────────────────'));
+
+    // Growth
+    if (result.growth) {
+      console.log(chalk.bold('\n  Growth (30d):'));
+      console.log(`    Resources: +${chalk.green(result.growth.newResources)}`);
+      console.log(`    Relations: +${chalk.green(result.growth.newRelations)}`);
+      console.log(`    Rate:       ${chalk.cyan(result.growth.rate)} / day`);
+    }
+
+    // Velocity
+    if (result.velocity) {
+      console.log(chalk.bold('\n  Velocity:'));
+      console.log(`    Value: ${chalk.cyan(result.velocity.value)}`);
+      console.log(`    Type:  ${result.velocity.type === 'connector' ? chalk.green('connector') : result.velocity.type === 'balanced' ? chalk.cyan('balanced') : chalk.yellow('collector')}`);
+    }
+
+    // Entropy
+    if (result.entropy) {
+      console.log(chalk.bold('\n  Entropy:'));
+      console.log(`    Value:  ${chalk.cyan(result.entropy.normalized)}`);
+      console.log(`    Status: ${result.entropy.interpretation === 'balanced' ? chalk.green('balanced') : result.entropy.interpretation === 'concentrated' ? chalk.yellow('concentrated') : chalk.cyan('moderate')}`);
+      console.log(`    Types:  ${result.entropy.typeCount}`);
+    }
+
+    // Trend
+    if (result.trend) {
+      console.log(chalk.bold('\n  Trend:'));
+      const dirLabel = result.trend.direction === 'accelerating' ? chalk.green('accelerating') :
+        result.trend.direction === 'decelerating' ? chalk.red('decelerating') : chalk.gray('stable');
+      console.log(`    Direction: ${dirLabel}`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`演化分析失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo knowledge patterns
+ */
+async function knowledgePatternsHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const patterns = await repo.detectKnowledgePatterns({ minDegree: 3, maxResults: 15 });
+
+    console.log(chalk.bold.cyan('\n  Detected Knowledge Patterns'));
+    console.log(chalk.gray('  ───────────────────────────────'));
+
+    // Hubs
+    if (patterns.hubs && patterns.hubs.length > 0) {
+      console.log(chalk.bold('\n  Hubs:'));
+      for (const h of patterns.hubs) {
+        console.log(`    ${chalk.cyan(h.rid)}  degree: ${chalk.green(h.degree)} (in:${h.incoming} out:${h.outgoing})`);
+      }
+    } else {
+      console.log(chalk.gray('\n  No hub patterns found.'));
+    }
+
+    // Chains
+    if (patterns.chains && patterns.chains.length > 0) {
+      console.log(chalk.bold('\n  Chains:'));
+      for (const c of patterns.chains) {
+        console.log(`    ${chalk.cyan(`[${c.length}]`)}  ${c.description}`);
+      }
+    }
+
+    // Bridges
+    if (patterns.bridges && patterns.bridges.length > 0) {
+      console.log(chalk.bold('\n  Bridges:'));
+      for (const b of patterns.bridges) {
+        console.log(`    ${chalk.cyan(b.rid)}  ${chalk.gray(b.description)}`);
+      }
+    }
+
+    // Dead-ends
+    if (patterns.deadEnds && patterns.deadEnds.length > 0) {
+      console.log(chalk.bold('\n  Dead Ends:'));
+      for (const d of patterns.deadEnds) {
+        console.log(`    ${chalk.cyan(d.rid)}  ${chalk.yellow(`${d.incoming} refs`)} → no outgoing`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`模式检测失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo knowledge strategy
+ */
+async function knowledgeStrategyHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const actions = await repo.generateKnowledgeStrategy();
+
+    console.log(chalk.bold.cyan('\n  Recommended Knowledge Actions'));
+    console.log(chalk.gray('  ───────────────────────────────'));
+
+    if (actions.length === 0) {
+      console.log(chalk.green('\n  Knowledge base is well-balanced. No actions recommended.'));
+    }
+
+    for (const a of actions) {
+      const actionColor = {
+        connect: chalk.green,
+        expand: chalk.cyan,
+        refactor: chalk.yellow,
+        explore: chalk.magenta
+      }[a.action] || chalk.white;
+
+      const priorityIcon = a.priority === 'high' ? '!' : a.priority === 'medium' ? '~' : '.';
+
+      console.log(actionColor(`\n  [${a.action.toUpperCase()}] ${priorityIcon}`));
+      console.log(`    ${chalk.gray(a.reason)}`);
+      if (a.suggestion) {
+        console.log(`    ${chalk.gray('→ ' + a.suggestion)}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`策略生成失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo knowledge snapshot
+ */
+async function knowledgeSnapshotHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const snap = await repo.createKnowledgeSnapshot();
+
+    console.log(chalk.green(`\n  Snapshot created:`));
+    console.log(`    ID:       ${chalk.cyan(snap.id)}`);
+    console.log(`    Date:     ${new Date(snap.created_at).toLocaleDateString()}`);
+    console.log(`    Resources: ${snap.resourceCount}`);
+    console.log(`    Relations: ${snap.relationCount}`);
+    console.log(`    Density:   ${snap.density}`);
+    console.log(`    Entropy:   ${snap.entropy}`);
+    console.log(`    Growth:    ${snap.growth}`);
+
+    console.log(chalk.gray('\n  Use "lo knowledge snapshot list" to view history.\n'));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`快照创建失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -1380,5 +1562,9 @@ module.exports = {
   syncStatus: syncStatusHandler,
   syncConflictList: syncConflictListHandler,
   syncConflictResolve: syncConflictResolveHandler,
-  graphQueryFederated: graphQueryFederatedHandler
+  graphQueryFederated: graphQueryFederatedHandler,
+  knowledgeEvolution: knowledgeEvolutionHandler,
+  knowledgePatterns: knowledgePatternsHandler,
+  knowledgeStrategy: knowledgeStrategyHandler,
+  knowledgeSnapshot: knowledgeSnapshotHandler
 };

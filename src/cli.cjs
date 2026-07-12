@@ -674,7 +674,15 @@ cli
           .demandCommand(1, '请指定 AI 子命令。可用: explain, summarize, ask');
       })
 
-      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline, lifecycle, repair, ai');
+      .command('evolution', '知识演化分析（增长/速度/熵/趋势）', {}, graphCmd.knowledgeEvolution)
+
+      .command('patterns', '知识模式检测（Hub/Chain/Bridge/Dead-end）', {}, graphCmd.knowledgePatterns)
+
+      .command('strategy', '知识构建策略推荐', {}, graphCmd.knowledgeStrategy)
+
+      .command('snapshot', '创建知识状态快照', {}, graphCmd.knowledgeSnapshot)
+
+      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline, lifecycle, repair, ai, evolution, patterns, strategy, snapshot');
   })
 
   .command('suggestion', 'AI 建议管理（Phase 5.8）', (yargs) => {

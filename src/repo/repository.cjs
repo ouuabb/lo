@@ -36,6 +36,11 @@ const FederationManager = require('./federationManager.cjs');
 const FederatedGraphEngine = require('./federatedGraphEngine.cjs');
 const SyncEngine = require('./syncEngine.cjs');
 const GlobalRID = require('../domain/globalResourceId.cjs');
+const KnowledgeEvolutionEngine = require('./knowledgeEvolutionEngine.cjs');
+const KnowledgePatternEngine = require('./knowledgePatternEngine.cjs');
+const KnowledgeStrategyEngine = require('./knowledgeStrategyEngine.cjs');
+const CollectiveKnowledgeEngine = require('./collectiveKnowledgeEngine.cjs');
+const EvolutionMemory = require('./evolutionMemory.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -1887,6 +1892,142 @@ class Repository {
   async getSyncHistory(limit = 20) {
     const se = this.getSyncEngine();
     return se.syncHistory(limit);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.11: Knowledge Evolution & Collective Intelligence
+  // ──────────────────────────────────────
+
+  /**
+   * 获取知识演化引擎
+   */
+  async _getEvolutionEngine() {
+    const engine = await this._getGraphEngine();
+    return new KnowledgeEvolutionEngine(this.db, engine);
+  }
+
+  /**
+   * 获取知识模式引擎
+   */
+  async _getPatternEngine() {
+    const engine = await this._getGraphEngine();
+    return new KnowledgePatternEngine(engine, this.db);
+  }
+
+  /**
+   * 获取知识策略引擎
+   */
+  async _getStrategyEngine() {
+    const engine = await this._getGraphEngine();
+    const ee = new KnowledgeEvolutionEngine(this.db, engine);
+    const pe = null; // lazy
+    return new KnowledgeStrategyEngine(this.db, { graphEngine: engine, evolutionEngine: ee });
+  }
+
+  /**
+   * 获取演化记忆
+   */
+  getEvolutionMemory() {
+    return new EvolutionMemory(this.db);
+  }
+
+  /**
+   * 知识演化分析
+   */
+  async analyzeEvolution(options = {}) {
+    const ee = await this._getEvolutionEngine();
+    return ee.analyze(options);
+  }
+
+  /**
+   * 知识模式检测
+   */
+  async detectKnowledgePatterns(options = {}) {
+    const pe = await this._getPatternEngine();
+    return pe.detectAll(options);
+  }
+
+  /**
+   * 生成知识策略
+   */
+  async generateKnowledgeStrategy() {
+    const engine = await this._getGraphEngine();
+    const ee = new KnowledgeEvolutionEngine(this.db, engine);
+
+    let pe = null;
+    try { pe = await this._getPatternEngine(); } catch {}
+
+    const se = new KnowledgeStrategyEngine(this.db, {
+      graphEngine: engine,
+      evolutionEngine: ee,
+      patternEngine: pe
+    });
+
+    return se.generate();
+  }
+
+  /**
+   * 集体知识分析
+   */
+  async collectiveKnowledgeAnalysis() {
+    const fm = this.getFederationManager();
+    const ce = new CollectiveKnowledgeEngine(this.db, fm);
+    return ce.analyze();
+  }
+
+  /**
+   * 创建知识快照
+   */
+  async createKnowledgeSnapshot() {
+    const em = this.getEvolutionMemory();
+
+    // Gather current stats
+    const [resCount, relCount] = await Promise.all([
+      this.db.get('SELECT COUNT(*) as c FROM resources WHERE deleted = 0'),
+      this.db.get('SELECT COUNT(*) as c FROM relations WHERE deleted = 0')
+    ]);
+
+    let density = 0;
+    let entropy = 0;
+    let growth = 0;
+
+    try {
+      const engine = await this._getGraphEngine();
+      const analyzer = new (require('./knowledgeAnalyzer.cjs'))(engine);
+      const d = await analyzer.density();
+      density = d.density;
+
+      const ee = new KnowledgeEvolutionEngine(this.db, engine);
+      const ent = await ee.entropy();
+      entropy = ent.normalized;
+
+      const gr = await ee.growthRate(30);
+      growth = gr.rate;
+    } catch {}
+
+    return em.createSnapshot({
+      resourceCount: resCount ? resCount.c : 0,
+      relationCount: relCount ? relCount.c : 0,
+      density,
+      entropy,
+      growth
+    });
+  }
+
+  /**
+   * 列出知识快照
+   */
+  async listKnowledgeSnapshots(limit = 20) {
+    const em = this.getEvolutionMemory();
+    return em.list({ limit });
+  }
+
+  /**
+   * 比较快照
+   */
+  async compareSnapshots(snapshotId) {
+    const em = this.getEvolutionMemory();
+    return em.compare(snapshotId);
   }
 
   async exportGraph(format = 'json', options = {}) {

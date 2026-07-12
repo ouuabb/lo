@@ -294,6 +294,9 @@ class Database {
 
     // V12: 分布式知识图谱（Phase 5.10）
     await this._migrateDistributedV12();
+
+    // V13: knowledge_snapshots（Phase 5.11）
+    await this._migrateEvolutionV13();
   }
 
   run(sql, params = []) {
@@ -882,6 +885,29 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts(status)`);
     } catch (e) {
       console.error('[migrate] Distributed V12 失败:', e.message);
+    }
+  }
+
+  /**
+   * V13: Phase 5.11 Knowledge Evolution
+   *   knowledge_snapshots — 知识状态快照
+   */
+  async _migrateEvolutionV13() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS knowledge_snapshots (
+          id TEXT PRIMARY KEY,
+          created_at INTEGER,
+          resource_count INTEGER DEFAULT 0,
+          relation_count INTEGER DEFAULT 0,
+          density REAL DEFAULT 0,
+          entropy REAL DEFAULT 0,
+          growth REAL DEFAULT 0
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_snapshots_created ON knowledge_snapshots(created_at)`);
+    } catch (e) {
+      console.error('[migrate] Evolution V13 失败:', e.message);
     }
   }
 
