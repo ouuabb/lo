@@ -2370,6 +2370,194 @@ async function agentSendHandler(argv) {
   }
 }
 
+// ═══════════ Phase 6.7: AI OS Handlers ═══════════
+
+/**
+ * lo ai status
+ */
+async function aiStatusHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAIOS();
+
+    const status = await repo.getAIStatus();
+
+    console.log(chalk.bold.cyan('\n  AI OS'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Running:')}      ${status.running ? chalk.green('yes') : chalk.red('no')}`);
+
+    if (status.memory) {
+      console.log(`\n  ${chalk.cyan('Semantic Memory:')}`);
+      console.log(`    Entries:       ${status.memory.entryCount}`);
+      if (status.memory.byType) {
+        for (const [type, count] of Object.entries(status.memory.byType)) {
+          console.log(`    ${type}:        ${count}`);
+        }
+      }
+    }
+
+    if (status.concepts) {
+      console.log(`\n  ${chalk.cyan('Concept Memory:')}`);
+      console.log(`    Concepts:      ${status.concepts.conceptCount}`);
+      console.log(`    Avg Confidence: ${status.concepts.avgConfidence}`);
+    }
+
+    if (status.learning) {
+      console.log(`\n  ${chalk.cyan('Learning:')}`);
+      console.log(`    Records:       ${status.learning.totalRecords}`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 状态查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo ai ask <question>
+ */
+async function aiAskHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAIOS();
+
+    const mode = argv.mode || 'chat';
+    const response = await repo.askAI(argv.question, { mode });
+
+    console.log(chalk.bold.cyan('\n  AI Response'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Mode:')}        ${mode}`);
+    console.log(`  ${chalk.cyan('Confidence:')}  ${Math.round(response.confidence * 100)}%`);
+    console.log(`  ${chalk.cyan('Content:')}     ${response.content || 'No response'}`);
+
+    if (response.reasoning && response.reasoning.thoughts) {
+      console.log(`\n  ${chalk.cyan('Reasoning:')}`);
+      for (const t of response.reasoning.thoughts) {
+        console.log(`    ${chalk.gray(`[${t.step}]`)} ${t.content}`);
+      }
+    }
+
+    if (response.actions && response.actions.length > 0) {
+      console.log(`\n  ${chalk.cyan('Actions:')}   ${response.actions.length}`);
+      for (const a of response.actions) {
+        const statusIcon = a.status === 'completed' ? chalk.green('✓') : a.status === 'error' ? chalk.red('✗') : chalk.yellow('?');
+        console.log(`    ${statusIcon} ${a.action || a.step || '?'} ${a.target || ''}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 请求失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo ai analyze
+ */
+async function aiAnalyzeHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAIOS();
+
+    const response = await repo.analyzeKnowledge('知识体系分析');
+
+    console.log(chalk.bold.cyan('\n  Knowledge Analysis'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Content:')}     ${response.content}`);
+    console.log(`  ${chalk.cyan('Confidence:')}  ${Math.round(response.confidence * 100)}%`);
+
+    if (response.actions && response.actions.length > 0) {
+      console.log(`\n  ${chalk.cyan('Results:')}`);
+      for (const a of response.actions) {
+        console.log(`    ${chalk.gray('›')} ${a.action || a.step || '?'}: ${a.status || 'done'}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 分析失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo ai insights
+ */
+async function aiInsightsHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAIOS();
+
+    const insights = await repo.getAIInsights();
+
+    console.log(chalk.bold.cyan('\n  AI Insights'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (!insights || insights.length === 0) {
+      console.log(chalk.gray('  No insights yet.'));
+    } else {
+      for (const ins of insights) {
+        console.log(`  ${chalk.cyan(`[${ins.type}]`)}  ${ins.content}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 洞察失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo ai memory
+ */
+async function aiMemoryHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initAIOS();
+
+    const status = await repo.getAIStatus();
+
+    console.log(chalk.bold.cyan('\n  AI Memory'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (status.memory) {
+      console.log(`  ${chalk.cyan('Semantic Memory:')}  ${status.memory.entryCount} entries`);
+      if (status.memory.byType) {
+        for (const [type, count] of Object.entries(status.memory.byType)) {
+          console.log(`    ${type}: ${count}`);
+        }
+      }
+    }
+
+    if (status.concepts) {
+      console.log(`\n  ${chalk.cyan('Concept Memory:')}   ${status.concepts.conceptCount} concepts`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 记忆查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -2434,5 +2622,10 @@ module.exports = {
   teamList: teamListHandler,
   teamRun: teamRunHandler,
   agentMessages: agentMessagesHandler,
-  agentSend: agentSendHandler
+  agentSend: agentSendHandler,
+  aiStatus: aiStatusHandler,
+  aiAsk: aiAskHandler,
+  aiAnalyze: aiAnalyzeHandler,
+  aiInsights: aiInsightsHandler,
+  aiMemory: aiMemoryHandler
 };

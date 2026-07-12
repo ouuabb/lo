@@ -315,6 +315,9 @@ class Database {
 
     // V19: multi-agent collaboration（Phase 6.6）
     await this._migrateCollabV19();
+
+    // V20: AI Native Knowledge OS（Phase 6.7）
+    await this._migrateAIV20();
   }
 
   run(sql, params = []) {
@@ -1163,6 +1166,62 @@ class Database {
       `);
     } catch (e) {
       console.error('[migrate] Collab V19 失败:', e.message);
+    }
+  }
+
+  /**
+   * V20: Phase 6.7 AI Native Knowledge OS
+   *   ai_memory       — 语义记忆
+   *   ai_concepts     — 概念记忆
+   *   ai_interactions — AI 交互记录
+   *   ai_learning     — 学习记录
+   */
+  async _migrateAIV20() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_memory (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT,
+          concept TEXT,
+          value TEXT,
+          confidence REAL DEFAULT 0.5,
+          tags TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_concepts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT UNIQUE,
+          meaning TEXT,
+          confidence REAL DEFAULT 0.5,
+          metadata TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_interactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          request TEXT,
+          response TEXT,
+          actions TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_learning (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pattern TEXT,
+          feedback TEXT,
+          adjustment TEXT,
+          created_at INTEGER
+        )
+      `);
+    } catch (e) {
+      console.error('[migrate] AI V20 失败:', e.message);
     }
   }
 

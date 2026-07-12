@@ -883,6 +883,19 @@ cli
       .demandCommand(1, '请指定团队子命令。可用: list, run');
   })
 
+  .command('ai', 'AI 原生知识操作系统（Phase 6.7）', (yargs) => {
+    yargs
+      .command('status', '查看 AI OS 状态', {}, graphCmd.aiStatus)
+      .command('ask <question>', '向 AI 提问', (yargs) => {
+        yargs.positional('question', { type: 'string', description: '问题' });
+        yargs.option('mode', { type: 'string', description: '模式: chat/analysis/research/creation/automation', default: 'chat' });
+      }, graphCmd.aiAsk)
+      .command('analyze', '分析知识图谱', {}, graphCmd.aiAnalyze)
+      .command('insights', '查看 AI 洞察', {}, graphCmd.aiInsights)
+      .command('memory', '查看 AI 记忆', {}, graphCmd.aiMemory)
+      .demandCommand(1, '请指定 AI 子命令。可用: status, ask, analyze, insights, memory');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {

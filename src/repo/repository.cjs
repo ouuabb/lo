@@ -65,6 +65,7 @@ const CollaborationEngine = require('../collaboration/collaborationEngine.cjs');
 const CollaborationMemory = require('../collaboration/collaborationMemory.cjs');
 const SharedMemory = require('../collaboration/sharedMemory.cjs');
 const MessageBus = require('../collaboration/messageBus.cjs');
+const AIOS = require('../ai/aiOS.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2659,6 +2660,55 @@ class Repository {
   async getCollaborationHistory(teamId, limit) {
     const memory = new CollaborationMemory(this.db);
     return memory.listTasks(teamId, limit);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.7: AI Native Knowledge OS
+  // ──────────────────────────────────────
+
+  _getAIOS() {
+    if (!this._aiOS) {
+      this._aiOS = new AIOS({
+        repository: this,
+        graphEngine: this._getGraphEngine ? this._getGraphEngine() : null,
+        agentEngine: this._getAgentEngine ? this._getAgentEngine() : null,
+        workflowEngine: this._getWorkflowEngine ? this._getWorkflowEngine() : null,
+        eventBus: this._getEventBus()
+      });
+    }
+    return this._aiOS;
+  }
+
+  async initAIOS() {
+    const aiOS = this._getAIOS();
+    aiOS.start();
+    return aiOS;
+  }
+
+  async askAI(input, options) {
+    const aiOS = this._getAIOS();
+    return aiOS.ask(input, options);
+  }
+
+  async analyzeKnowledge(input) {
+    const aiOS = this._getAIOS();
+    return aiOS.analyze(input);
+  }
+
+  async getAIInsights() {
+    const aiOS = this._getAIOS();
+    return aiOS.insights();
+  }
+
+  async getAIStatus() {
+    const aiOS = this._getAIOS();
+    const obs = await aiOS.observe();
+    return {
+      running: aiOS.running,
+      memory: obs.memory,
+      concepts: obs.concepts,
+      learning: obs.learning
+    };
   }
 
   async exportGraph(format = 'json', options = {}) {
