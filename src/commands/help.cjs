@@ -1,79 +1,90 @@
+const fs = require('fs');
+const path = require('path');
 const chalk = require('chalk');
+const { renderer } = require('../utils/terminal-md-renderer.cjs');
+
+/**
+ * lo help — 从 docs/commands/*.md 提取命令概览
+ *
+ * 自动扫描命令 MD 文件，提取命令名和简短描述，按分组展示。
+ * MD 是唯一真相源。
+ */
+
+const COMMANDS_DIR = path.resolve(__dirname, '..', '..', 'docs', 'commands');
+
+// 命令分组定义（决定展示顺序和归类）
+const GROUPS = [
+  { name: '基础命令', keys: ['init', 'new', 'import', 'list', 'files', 'show', 'edit', 'delete'] },
+  { name: '版本控制', keys: ['add', 'commit', 'reset', 'diff', 'log', 'status', 'rm'] },
+  { name: '远程同步', keys: ['remote', 'push', 'pull', 'clone', 'serve'] },
+  { name: '资源管理', keys: ['create-resource', 'container', 'resource', 'link', 'unlink', 'move', 'tag', 'category', 'sync', 'stack'] },
+  { name: '关系图与知识智能', keys: ['graph', 'relation', 'knowledge', 'suggestion', 'automation', 'federation'] },
+  { name: '扩展系统（Phase 6.x）', keys: ['plugin', 'event', 'workflow', 'permission', 'agent', 'team', 'ai', 'evolution'] },
+  { name: '搜索与查询', keys: ['find', 'stats', 'index'] },
+  { name: '安全', keys: ['auth'] },
+  { name: '其他', keys: ['daily', 'backup', 'config', 'help', 'manual', 'docs-serve'] }
+];
+
+function loadCommandInfo(name) {
+  const mdPath = path.join(COMMANDS_DIR, `${name}.md`);
+  if (!fs.existsSync(mdPath)) return null;
+
+  const content = fs.readFileSync(mdPath, 'utf-8');
+  const cmdName = renderer.extractCommandName(content) || name;
+  const usage = renderer.extractUsage(content);
+  const desc = renderer.extractDescription(content);
+
+  return { name, cmdName, usage, desc };
+}
+
+function _renderUsageShort(usage) {
+  if (!usage) return '';
+  // 简化用法：保留命令名和主要参数，去掉选项细节
+  // e.g. "lo container <promote|status|scan|...> [选项...]" → "promote/status/scan/sync/list/..."
+  const parenMatch = usage.match(/<(.+?)>/);
+  if (parenMatch) {
+    return parenMatch[1].replace(/\|/g, '/');
+  }
+  return usage;
+}
 
 module.exports = function help(argv) {
-  console.log('\n' + chalk.bold('基础命令:'));
-  console.log('  init          初始化资源仓库');
-  console.log('  new           创建新资源（以 name/rid 标识，同名自动入栈）');
-  console.log('  import        导入资源');
-  console.log('  list           列出所有资源（资源视图，含容器/虚拟资源）');
-  console.log('  files          列出可操作文件（文件视图，仅显示 resources/ 下文件）');
-  console.log('  show          查看资源（支持 rid / name / path 三级查找）');
-  console.log('  edit          编辑资源');
-  console.log('  delete        删除资源');
-  
-  console.log('\n' + chalk.bold('版本控制:'));
-  console.log('  add           添加文件到暂存区');
-  console.log('  commit        提交暂存区（自动检测合并场景）');
-  console.log('  reset         取消暂存');
-  console.log('  diff          显示文件变更差异');
-  console.log('  log           查看提交历史');
-  console.log('  status        查看工作区状态');
-  console.log('  rm            暂存文件删除');
+  const allCommands = {};
 
-  console.log('\n' + chalk.bold('远程同步:'));
-  console.log('  remote        管理远程仓库别名');
-  console.log('  push          推送变更到远程设备');
-  console.log('  pull          从远程设备拉取变更');
-  console.log('  clone         从远程仓库克隆');
-  console.log('  serve         启动本地 HTTP API 服务');
+  // 加载所有命令
+  try {
+    const files = fs.readdirSync(COMMANDS_DIR).filter(f => f.endsWith('.md') && f !== 'index.md');
+    for (const file of files) {
+      const name = path.basename(file, '.md');
+      const info = loadCommandInfo(name);
+      if (info) {
+        allCommands[name] = info;
+      }
+    }
+  } catch (err) {
+    // 如果 MD 文件不存在，回退到空列表
+  }
 
-  console.log('\n' + chalk.bold('资源管理:'));
-  console.log('  create resource   创建容器资源（project/album/dataset 等）');
-  console.log('  container      容器管理（promote/status/scan/sync/list/members/ignore 等）');
-  console.log('  resource       资源导航（related/backlinks/impact）');
-  console.log('  link          建立资源链接');
-  console.log('  unlink        解除资源链接');
-  console.log('  move          移动资源');
-  console.log('  tag           管理标签');
-  console.log('  category      管理分类');
-  console.log('  sync          同步资源（含 [[wikilink]] 自动解析，无提交历史）');
-  console.log('  stack         管理资源栈（同名冲突冗余副本，list/pop/drop）');
+  // 按分组输出
+  for (const group of GROUPS) {
+    // 找到属于该分组的命令
+    const cmds = group.keys
+      .map(k => allCommands[k])
+      .filter(Boolean);
 
-  console.log('\n' + chalk.bold('关系图与知识智能:'));
-  console.log('  graph          资源关系图（neighbors/backlinks/path/cycles/export/analyze/query）');
-  console.log('  relation       关系管理（add/remove/list/show）');
-  console.log('  knowledge      知识智能（analyze/gaps/recommend/timeline/lifecycle/repair/ai/evolution）');
-  console.log('  suggestion     AI 建议管理（list/approve/execute/reject）');
-  console.log('  automation     知识自动化（run）');
-  console.log('  federation     联邦仓库管理（list/add/remove）');
+    if (cmds.length > 0) {
+      console.log('\n' + chalk.bold(group.name + ':'));
+      for (const cmd of cmds) {
+        const usage = _renderUsageShort(cmd.usage);
+        const shortUsage = usage ? `（${usage}）` : '';
+        const displayName = cmd.cmdName.replace(/^.+—\s*/, ''); // remove "xxx — " prefix
+        console.log(`  ${chalk.cyan(cmd.name.padEnd(16))} ${displayName || ''} ${chalk.gray(shortUsage)}`);
+      }
+    }
+  }
 
-  console.log('\n' + chalk.bold('扩展系统（Phase 6.x）:'));
-  console.log('  plugin         插件系统（list/enable/disable/reload/info）');
-  console.log('  event          事件总线（list/history/listeners/replay）');
-  console.log('  workflow       工作流引擎（list/run/status/history）');
-  console.log('  permission     权限管理（role/check/grant/audit）');
-  console.log('  agent          知识智能体（list/info/run/memory/messages/send）');
-  console.log('  team           Agent 团队协作（list/run）');
-  console.log('  ai             AI 原生知识 OS（status/ask/analyze/insights/memory）');
-  console.log('  evolution      知识系统自演化（status/analyze/run/history）');
-  
-  console.log('\n' + chalk.bold('搜索与查询:'));
-  console.log('  find          搜索资源');
-  console.log('  stats         显示统计信息');
-  console.log('  index         生成索引');
-  
-  console.log('\n' + chalk.bold('安全:'));
-  console.log('  auth          管理 SSH 身份认证');
-  
-  console.log('\n' + chalk.bold('其他:'));
-  console.log('  daily         创建今日日记');
-  console.log('  backup        备份资源仓库');
-  console.log('  config        管理配置');
-  console.log('  help          查看帮助');
-  console.log('  manual        查看命令手册');
-  console.log('  docs          查看功能详解（rid、stack、加密、认证等）');
-  
   console.log('\n' + chalk.gray('使用 lo <command> --help 查看详细帮助'));
-  console.log(chalk.gray('使用 lo manual 查看命令手册  |  lo docs 查看功能详解'));
+  console.log(chalk.gray('使用 lo manual <command> 查看命令手册  |  lo docs <topic> 查看功能详解'));
+  console.log(chalk.gray('使用 lo docs serve 启动 VitePress 文档站'));
   process.exit(0);
 };
