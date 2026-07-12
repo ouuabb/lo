@@ -1,12 +1,27 @@
 ## docs-serve — 启动 VitePress 文档站
 
-**用法:** `lo docs serve [--port <端口>]`
+**用法:** `lo docs serve`
 
-启动基于 VitePress 的本地文档站点，在浏览器中浏览 lo 的完整文档。文档站包含快速上手指南、核心概念、高级主题和命令参考。
+启动基于 VitePress 的本地文档站点，在浏览器中浏览 lo 的完整文档。
 
-### 选项
+### 文档系统的设计
 
-- `--port, -p <端口>` — 监听端口（默认: 5173）
+`docs/` 目录下的 Markdown 文件是 lo 文档的**唯一真相源**。同一个 MD 文件服务于两个渲染目标：
+
+```
+docs/**/*.md          ← 唯一真相源
+     │
+     ├──→ VitePress   lo docs serve  (浏览器，完整体验)
+     │
+     └──→ 终端渲染器  lo help / lo manual / lo docs  (终端)
+```
+
+- `lo help` — 从 `docs/commands/*.md` 提取命令概览
+- `lo manual <cmd>` — 从 `docs/commands/<cmd>.md` 渲染完整手册
+- `lo docs <topic>` — 从 `docs/**/<topic>.md` 渲染功能详解
+- `lo docs serve` — 用 VitePress 渲染为完整网站
+
+改一处 MD，终端和网站同时生效，不会产生文档漂移。文档内容只使用纯原生 Markdown 语法，确保两端渲染一致。
 
 ### 示例
 

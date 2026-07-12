@@ -91,8 +91,11 @@ lo clone user@host:~/notes ~/my-notes
 ```bash
 lo manual <命令名>    # 查看特定命令的详细手册
 lo help               # 查看简洁命令列表
-lo docs               # 查看所有文档索引
+lo docs <主题>        # 查看功能详解（加密、架构等）
+lo docs serve         # 启动完整文档网站（浏览器中浏览）
 ```
+
+> 以上命令读取的是同一套 Markdown 文件（`docs/**/*.md`），终端和网站共享唯一真相源。
 
 ### 相关文档
 
