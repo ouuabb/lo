@@ -1983,6 +1983,125 @@ async function workflowHistoryHandler(argv) {
   }
 }
 
+// ═══════════ Phase 6.4: Permission Handlers ═══════════
+
+/**
+ * lo permission role list
+ */
+async function permissionRoleListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initPermissionSystem();
+
+    const roles = await repo.listRoles();
+
+    console.log(chalk.bold.cyan('\n  Roles'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    for (const r of roles) {
+      console.log(`  ${chalk.cyan(r.id.padEnd(15))}  ${r.name.padEnd(10)}  ${chalk.gray(String(r.permissionCount).padStart(3))} permissions  ${chalk.gray(r.description)}`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`角色列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo permission check <subject> <action> [resource]
+ */
+async function permissionCheckHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initPermissionSystem();
+
+    const result = await repo.checkPermission(argv.subject, argv.action, argv.resource || null);
+
+    console.log(chalk.bold.cyan('\n  Permission Check'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Subject:')}   ${argv.subject}`);
+    console.log(`  ${chalk.cyan('Action:')}    ${argv.action}`);
+    if (argv.resource) console.log(`  ${chalk.cyan('Resource:')}  ${argv.resource}`);
+    console.log(`  ${chalk.cyan('Result:')}    ${result.allowed ? chalk.green('ALLOWED') : chalk.red('DENIED')}`);
+    console.log(`  ${chalk.cyan('Reason:')}    ${result.reason}`);
+    console.log('');
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`权限检查失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo permission audit
+ */
+async function permissionAuditHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const auditLog = await repo.getPermissionAudit({ limit: 20 });
+    const deniedStats = await repo.getDeniedPermissionStats();
+
+    console.log(chalk.bold.cyan('\n  Permission Audit'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (deniedStats.length > 0) {
+      console.log(chalk.yellow('  Denied:'));
+      for (const d of deniedStats.slice(0, 5)) {
+        console.log(`    ${chalk.red(d.subject.padEnd(15))} ${d.action.padEnd(20)} x${d.count}`);
+      }
+      console.log('');
+    }
+
+    console.log(chalk.cyan('  Recent:'));
+    if (auditLog.length === 0) {
+      console.log(chalk.gray('    No audit records yet.'));
+    } else {
+      for (const a of auditLog.slice(0, 10)) {
+        const icon = a.allowed ? chalk.green('✓') : chalk.red('✗');
+        const time = new Date(a.createdAt).toLocaleString();
+        console.log(`    ${icon} ${a.subject.padEnd(12)} ${a.action.padEnd(20)} ${chalk.gray(time)}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`权限审计失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo permission grant <subject> <action>
+ */
+async function permissionGrantHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initPermissionSystem();
+
+    await repo.grantPermission(argv.subject, argv.action);
+
+    console.log(chalk.green(`\n  Granted '${argv.action}' to '${argv.subject}'.\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`权限授予失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -2035,5 +2154,9 @@ module.exports = {
   workflowList: workflowListHandler,
   workflowRun: workflowRunHandler,
   workflowStatus: workflowStatusHandler,
-  workflowHistory: workflowHistoryHandler
+  workflowHistory: workflowHistoryHandler,
+  permissionRoleList: permissionRoleListHandler,
+  permissionCheck: permissionCheckHandler,
+  permissionAudit: permissionAuditHandler,
+  permissionGrant: permissionGrantHandler
 };

@@ -823,6 +823,30 @@ cli
       .demandCommand(1, '请指定工作流子命令。可用: list, run, status, history');
   })
 
+  .command('permission', '权限管理（Phase 6.4）', (yargs) => {
+    yargs
+      .command('role', '角色管理', (yargs) => {
+        yargs
+          .command('list', '列出角色', {}, graphCmd.permissionRoleList)
+          .demandCommand(1, '请指定角色子命令。可用: list');
+      }, () => {})
+
+      .command('check <subject> <action>', '检查权限', (yargs) => {
+        yargs.positional('subject', { type: 'string', description: '主体（如 current-user）' });
+        yargs.positional('action', { type: 'string', description: '权限（如 resource.read）' });
+        yargs.option('resource', { type: 'string', description: '资源 RID（可选）' });
+      }, graphCmd.permissionCheck)
+
+      .command('grant <subject> <action>', '授予权限', (yargs) => {
+        yargs.positional('subject', { type: 'string', description: '主体' });
+        yargs.positional('action', { type: 'string', description: '权限代码' });
+      }, graphCmd.permissionGrant)
+
+      .command('audit', '权限审计日志', {}, graphCmd.permissionAudit)
+
+      .demandCommand(1, '请指定权限子命令。可用: role, check, grant, audit');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {

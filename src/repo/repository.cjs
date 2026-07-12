@@ -52,6 +52,9 @@ const WorkflowEngine = require('../workflow/workflowEngine.cjs');
 const StepExecutor = require('../workflow/stepExecutor.cjs');
 const ConditionEngine = require('../workflow/conditionEngine.cjs');
 const WorkflowScheduler = require('../workflow/workflowScheduler.cjs');
+const PermissionManager = require('../security/permissionManager.cjs');
+const PolicyEngine = require('../security/policyEngine.cjs');
+const PermissionAudit = require('../security/permissionAudit.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2382,6 +2385,84 @@ class Repository {
   async getWorkflowHistory(workflowId, limit) {
     const engine = this._getWorkflowEngine();
     return engine.getHistory(workflowId, limit);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.4: Permission System
+  // ──────────────────────────────────────
+
+  _getPermissionManager() {
+    if (!this._permissionManager) {
+      this._permissionManager = new PermissionManager(this.db);
+      this._permissionManager.initialize().catch(() => {});
+    }
+    return this._permissionManager;
+  }
+
+  _getPolicyEngine() {
+    if (!this._policyEngine) {
+      this._policyEngine = new PolicyEngine({
+        permissionManager: this._getPermissionManager(),
+        audit: new PermissionAudit(this.db)
+      });
+    }
+    return this._policyEngine;
+  }
+
+  async checkPermission(subject, action, resource) {
+    const engine = this._getPolicyEngine();
+    return engine.check(subject, action, resource);
+  }
+
+  async initPermissionSystem() {
+    const pm = this._getPermissionManager();
+    await pm.initialize();
+    return pm;
+  }
+
+  async createRole(def) {
+    const pm = this._getPermissionManager();
+    return pm.createRole(def);
+  }
+
+  async listRoles() {
+    const pm = this._getPermissionManager();
+    return pm.listRoles();
+  }
+
+  async assignRole(subjectId, roleId) {
+    const pm = this._getPermissionManager();
+    return pm.assignRole(subjectId, roleId);
+  }
+
+  async unassignRole(subjectId, roleId) {
+    const pm = this._getPermissionManager();
+    return pm.unassignRole(subjectId, roleId);
+  }
+
+  async grantPermission(subjectId, action) {
+    const pm = this._getPermissionManager();
+    return pm.grantPermission(subjectId, action);
+  }
+
+  async revokePermission(subjectId, action) {
+    const pm = this._getPermissionManager();
+    return pm.revokePermission(subjectId, action);
+  }
+
+  async setResourceACL(resourceId, policy) {
+    const pm = this._getPermissionManager();
+    return pm.setResourceACL(resourceId, policy);
+  }
+
+  async getPermissionAudit(options) {
+    const audit = new PermissionAudit(this.db);
+    return audit.query(options);
+  }
+
+  async getDeniedPermissionStats() {
+    const audit = new PermissionAudit(this.db);
+    return audit.deniedStats();
   }
 
   async exportGraph(format = 'json', options = {}) {

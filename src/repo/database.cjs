@@ -306,6 +306,9 @@ class Database {
 
     // V16: workflow engine（Phase 6.3）
     await this._migrateWorkflowV16();
+
+    // V17: permission system（Phase 6.4）
+    await this._migratePermissionV17();
   }
 
   run(sql, params = []) {
@@ -1004,6 +1007,69 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_wfexec_workflow ON workflow_executions(workflow_id)`);
     } catch (e) {
       console.error('[migrate] Workflow V16 失败:', e.message);
+    }
+  }
+
+  /**
+   * V17: Phase 6.4 Permission System
+   *   roles            — 角色
+   *   subjects_roles   — 角色绑定
+   *   permissions      — 直接权限
+   *   resource_acl     — 资源 ACL
+   *   permission_audit — 审计日志
+   */
+  async _migratePermissionV17() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS roles (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          description TEXT DEFAULT '',
+          permissions TEXT DEFAULT '[]'
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS subjects_roles (
+          subject_id TEXT NOT NULL,
+          role_id TEXT NOT NULL,
+          PRIMARY KEY (subject_id, role_id)
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS permissions (
+          id TEXT PRIMARY KEY,
+          subject_id TEXT NOT NULL,
+          action TEXT NOT NULL
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS resource_acl (
+          resource_id TEXT NOT NULL,
+          subject_id TEXT NOT NULL,
+          permission TEXT NOT NULL,
+          deny INTEGER DEFAULT 0
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS permission_audit (
+          id TEXT PRIMARY KEY,
+          subject TEXT NOT NULL,
+          action TEXT NOT NULL,
+          resource TEXT DEFAULT '',
+          allowed INTEGER DEFAULT 1,
+          reason TEXT DEFAULT '',
+          created_at INTEGER NOT NULL
+        )
+      `);
+
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_subject ON permission_audit(subject)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_created ON permission_audit(created_at)`);
+    } catch (e) {
+      console.error('[migrate] Permission V17 失败:', e.message);
     }
   }
 
