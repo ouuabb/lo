@@ -7,7 +7,7 @@
 ### 工作机制
 
 提交流程:
-1. 读取 staging.json 中的暂存内容
+1. 读取 staging_changes 表中的暂存内容
 2. 新增文件 (added) → 导入到数据库
 3. 修改文件 (modified) → 调用 refresh() 更新散列和元数据
 4. 删除文件 (deleted) → 标记数据库记录为已删除

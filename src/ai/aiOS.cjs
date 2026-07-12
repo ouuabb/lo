@@ -48,8 +48,8 @@ class AIOS {
     this.eventBus = services.eventBus || null;
 
     // 创建子系统
-    this.semanticMemory = new SemanticMemory();
-    this.conceptMemory = new ConceptMemory();
+    this.semanticMemory = new SemanticMemory(this.repository ? this.repository.db : null);
+    this.conceptMemory = new ConceptMemory(this.repository ? this.repository.db : null);
     this.knowledgeReasoner = new KnowledgeReasoner({ repository: this.repository, graphEngine: this.graphEngine });
     this.reasoningEngine = new ReasoningEngine({
       knowledgeReasoner: this.knowledgeReasoner,

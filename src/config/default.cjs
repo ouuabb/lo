@@ -23,6 +23,8 @@ const defaults = {
 };
 
 let userConfig = {};
+
+// 1. 优先读 .note/config.json（启动时 DB 尚未打开）
 try {
   const configPath = path.join(process.cwd(), '.note', 'config.json');
   if (fs.existsSync(configPath)) {
@@ -48,6 +50,7 @@ merged.getDefaultDir = function () {
 // 根据分类 key 获取 docs 下的子目录路径
 merged.getCategoryDir = function (category) {
   if (!category) return this.getDefaultDir();
+  // 优先内存（启动时从 config.json 加载），其次 directories map
   const sub = this.directories[category];
   if (!sub) return null;
   return path.join(this.ROOT_DIR, sub);
@@ -60,6 +63,20 @@ merged.getAllDirectories = function () {
     dirs.push(path.join(this.ROOT_DIR, sub));
   }
   return dirs;
+};
+
+// 从 DB 同步目录映射（inited 后调用）
+merged.syncFromDb = function (db) {
+  if (!db) return;
+  try {
+    const rows = db.all("SELECT key, value FROM sync_config WHERE key LIKE 'config.directories.%'");
+    for (const row of rows) {
+      const category = row.key.replace('config.directories.', '');
+      if (category && !merged.directories[category]) {
+        merged.directories[category] = row.value;
+      }
+    }
+  } catch { /* 静默跳过 */ }
 };
 
 module.exports = merged;

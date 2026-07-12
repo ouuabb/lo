@@ -330,6 +330,9 @@ class Database {
 
     // V24: Normalize embedded arrays into dedicated tables
     await this._migrateNormalizeV24();
+
+    // V25: staging → DB, AI/evolution memory → existing tables, shared_memory
+    await this._migrateNormalizeV25();
   }
 
   run(sql, params = []) {
@@ -1612,6 +1615,93 @@ class Database {
     } catch (e) {
       console.error('[migrate] Normalize V24 失败:', e.message);
     }
+  }
+
+  /**
+   * V25: 非独立实体进数据库
+   *   - staging_changes    — 暂存区（替代 staging.json）
+   *   - shared_memory      — Agent 协作共享记忆
+   *   - ai_memory 修复     — V10/V20 表结构冲突修复
+   */
+  async _migrateNormalizeV25() {
+    try {
+      // 1. 修复 ai_memory 表（V10 建了旧结构，V20 的 CREATE IF NOT EXISTS 被跳过）
+      const aiCols = await this.all("PRAGMA table_info(ai_memory)");
+      if (aiCols.length > 0 && aiCols.some(c => c.name === 'rid')) {
+        // V10 旧结构：有 rid 列 → 删除重建为 V20 结构
+        await this.run('DROP TABLE ai_memory');
+      }
+      // 统一用 V20 结构
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_memory (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT,
+          concept TEXT,
+          value TEXT,
+          confidence REAL DEFAULT 0.5,
+          tags TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      // 2. staging_changes 表
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS staging_changes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL CHECK(type IN ('add','modify','delete','rename','metadata')),
+          path TEXT NOT NULL,
+          old_path TEXT,
+          rid TEXT,
+          meta_json TEXT,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_staging_type ON staging_changes(type)`);
+
+      // 3. shared_memory 表
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS shared_memory (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          entry_id TEXT UNIQUE NOT NULL,
+          scope TEXT NOT NULL,
+          type TEXT NOT NULL,
+          content TEXT,
+          owner TEXT DEFAULT 'system',
+          visibility TEXT DEFAULT 'all',
+          created_at INTEGER NOT NULL
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_shared_scope_type ON shared_memory(scope, type)`);
+
+      // 4. ai_concepts 补充 relations 列（V20 漏了）
+      try { await this.run(`ALTER TABLE ai_concepts ADD COLUMN relations TEXT DEFAULT '[]'`); } catch {}
+
+      // 5. config.json 目录映射 → sync_config
+      await this._migrateConfigDirs();
+
+      console.log('[migrate] Normalize V25 ok');
+    } catch (e) {
+      throw new Error(`[migrate] Normalize V25 失败: ${e.message}`);
+    }
+  }
+
+  /**
+   * V25 辅助: config.json → sync_config
+   */
+  async _migrateConfigDirs() {
+    try {
+      const configPath = require('path').join(this.repoPath, '.note', 'config.json');
+      if (!require('fs-extra').existsSync(configPath)) return;
+
+      const config = require('fs-extra').readJsonSync(configPath);
+      const dirs = config.directories || {};
+      for (const [category, subdir] of Object.entries(dirs)) {
+        await this.run(
+          'INSERT OR REPLACE INTO sync_config (key, value) VALUES (?, ?)',
+          [`config.directories.${category}`, subdir]
+        );
+      }
+    } catch { /* config.json 不是关键路径，静默跳过 */ }
   }
 
   /**

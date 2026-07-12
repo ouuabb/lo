@@ -1,6 +1,5 @@
 const chalk = require('chalk');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
 
 async function commit(argv) {
   const repoPath = process.cwd();
@@ -9,7 +8,7 @@ async function commit(argv) {
   const repo = new Repository(repoPath);
   await repo.open();
 
-  const staging = new StagingArea(repoPath);
+  const staging = repo.staging;
   const hasChanges = await staging.hasChanges();
 
   if (!hasChanges) {
@@ -86,10 +85,7 @@ async function commit(argv) {
   // 合并提交后清除已解决的入栈冲突资源
   if (isMerge) {
     for (const r of stackedConflicts) {
-      await repo.db.run(
-        'DELETE FROM resources WHERE rid = ?',
-        [r.rid]
-      );
+      await repo.resourceService.delete(r.rid, true);
     }
   }
 

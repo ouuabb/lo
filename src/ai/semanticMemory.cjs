@@ -9,61 +9,88 @@
  *   preference  — 偏好
  *   pattern     — 模式
  *   insight     — 洞察
+ *
+ * 唯一数据源: ai_memory 表
  */
 
 class SemanticMemory {
-  constructor() {
-    /** @type {Array} */
-    this._entries = [];
-    this._idCounter = 0;
+  /**
+   * @param {object} db - Database 实例
+   */
+  constructor(db) {
+    this._db = db;
   }
 
   /**
-   * 保存
+   * 保存记忆条目
    */
   save(entry) {
-    const e = {
-      id: `sm_${++this._idCounter}`,
-      type: entry.type || 'concept',
-      concept: entry.concept || '',
-      value: entry.value,
-      tags: entry.tags || [],
-      confidence: entry.confidence || 0.5,
-      createdAt: Date.now()
-    };
-    this._entries.push(e);
-    return e;
+    const type = entry.type || 'concept';
+    const concept = entry.concept || '';
+    const value = typeof entry.value === 'string' ? entry.value : JSON.stringify(entry.value);
+    const confidence = entry.confidence || 0.5;
+    const tags = JSON.stringify(entry.tags || []);
+    const createdAt = Date.now();
+
+    this._db.run(
+      `INSERT INTO ai_memory (type, concept, value, confidence, tags, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      [type, concept, value, confidence, tags, createdAt]
+    );
+
+    return { type, concept, value: entry.value, confidence, tags: entry.tags || [], createdAt };
   }
 
   /**
-   * 检索
+   * 检索记忆
    */
   retrieve(query, limit = 10) {
-    if (!query) return this._entries.slice(-limit).reverse();
-    const q = query.toLowerCase();
-    return this._entries
-      .filter(e =>
-        (e.concept && e.concept.toLowerCase().includes(q)) ||
-        (typeof e.value === 'string' && e.value.toLowerCase().includes(q)) ||
-        (e.tags || []).some(t => t.toLowerCase().includes(q))
-      )
-      .reverse()
-      .slice(0, limit);
+    if (!query) {
+      const rows = this._db.all(
+        'SELECT * FROM ai_memory ORDER BY created_at DESC LIMIT ?', [limit]
+      );
+      return rows.map(r => this._hydrate(r)).reverse();
+    }
+
+    const q = `%${query.toLowerCase()}%`;
+    const rows = this._db.all(
+      `SELECT * FROM ai_memory WHERE LOWER(concept) LIKE ? OR LOWER(value) LIKE ? OR LOWER(tags) LIKE ? ORDER BY created_at DESC LIMIT ?`,
+      [q, q, q, limit]
+    );
+    return rows.map(r => this._hydrate(r));
   }
 
   /**
    * 按类型查询
    */
   getByType(type, limit = 20) {
-    return this._entries.filter(e => e.type === type).reverse().slice(0, limit);
+    const rows = this._db.all(
+      'SELECT * FROM ai_memory WHERE type = ? ORDER BY created_at DESC LIMIT ?', [type, limit]
+    );
+    return rows.map(r => this._hydrate(r));
   }
 
   stats() {
     const byType = {};
-    for (const e of this._entries) {
-      byType[e.type] = (byType[e.type] || 0) + 1;
-    }
-    return { entryCount: this._entries.length, byType };
+    const rows = this._db.all('SELECT type, COUNT(*) as cnt FROM ai_memory GROUP BY type');
+    for (const r of rows) byType[r.type] = r.cnt;
+    const total = this._db.get('SELECT COUNT(*) as c FROM ai_memory');
+    return { entryCount: total.c, byType };
+  }
+
+  _hydrate(row) {
+    let value = row.value;
+    try { value = JSON.parse(row.value); } catch {}
+    let tags = [];
+    try { tags = JSON.parse(row.tags || '[]'); } catch {}
+    return {
+      id: row.id,
+      type: row.type,
+      concept: row.concept,
+      value,
+      confidence: row.confidence,
+      tags,
+      createdAt: row.created_at
+    };
   }
 }
 

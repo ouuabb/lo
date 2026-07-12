@@ -1,4 +1,6 @@
-export default {
+import { withMermaid } from 'vitepress-plugin-mermaid';
+
+export default withMermaid({
   title: 'lo — AI 原生知识管理 CLI',
   description: '本地优先、端到端加密、AI 原生的知识管理工具',
   lang: 'zh-CN',
@@ -18,7 +20,9 @@ export default {
       { text: '命令参考', link: '/commands/init' },
       { text: '核心概念', link: '/core/rid' },
       { text: '扩展系统', link: '/systems/plugin' },
-      { text: '知识图谱', link: '/knowledge/graph' }
+      { text: '知识图谱', link: '/knowledge/graph' },
+      { text: '进阶', link: '/advanced/architecture' },
+      { text: '参考', link: '/reference/glossary' }
     ],
 
     sidebar: {
@@ -141,6 +145,7 @@ export default {
             { text: 'daily — 今日日记', link: '/commands/daily' },
             { text: 'backup — 备份', link: '/commands/backup' },
             { text: 'config — 管理配置', link: '/commands/config' },
+            { text: 'admin — 管理后台', link: '/commands/admin' },
             { text: 'docs serve — 文档站点', link: '/commands/docs-serve' }
           ]
         }
@@ -165,6 +170,12 @@ export default {
             { text: '操作追踪体系', link: '/advanced/operations' },
             { text: '备份与恢复', link: '/advanced/backup' },
             { text: '安全设计摘要', link: '/advanced/security' }
+          ]
+        },
+        {
+          text: '架构审计',
+          items: [
+            { text: '数据一致性审计', link: '/architecture/data-consistency' }
           ]
         }
       ]
@@ -197,4 +208,4 @@ export default {
     sidebarMenuLabel: '菜单',
     returnToTopLabel: '回到顶部'
   }
-};
+});

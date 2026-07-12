@@ -8,7 +8,7 @@
 1. 创建 resources/ 资源目录
 2. 创建 .repo/ 仓库元数据目录
 3. 初始化 SQLite 数据库（database.sqlite）
-4. 初始化暂存区（staging.json）
+4. 初始化暂存区（staging_changes 表）
 5. 生成 AES-256-GCM 加密密钥（.repo/keys/repo.key）
 6. 创建 .note/config.json 用户配置文件
 

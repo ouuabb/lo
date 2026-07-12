@@ -110,6 +110,7 @@ class Repository {
     this.queryEngine = new QueryEngine(this.db);
     this._graphCache = new GraphCache();
     this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
+    this.staging.setDb(this.db);
     this.containerService = new ContainerService(this.db, this.resourceService, {
       getCryptoKey: () => this._cryptoKey
     });
@@ -135,6 +136,7 @@ class Repository {
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
     this.syncOps = new SyncOpsEngine(this.db, this.repoPath);
+    this.staging.setDb(this.db);
     this.containerService = new ContainerService(this.db, this.resourceService, {
       getCryptoKey: () => this._cryptoKey
     });
@@ -2655,7 +2657,7 @@ class Repository {
       const teamRegistry = new TeamRegistry();
       const memory = new CollaborationMemory(this.db);
       const messageBus = new MessageBus({ memory, eventBus: this._getEventBus() });
-      const sharedMemory = new SharedMemory();
+      const sharedMemory = new SharedMemory(this.db);
 
       this._collaborationEngine = new CollaborationEngine({
         teamRegistry,

@@ -32,7 +32,7 @@ class EvolutionEngine {
   constructor(services = {}) {
     this.logger = services.logger || console;
 
-    this.memory = new EvolutionMemory();
+    this.memory = new EvolutionMemory(services.repository ? services.repository.db : null);
 
     this.observer = new SystemObserver({
       repository: services.repository,

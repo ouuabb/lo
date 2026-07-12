@@ -8,9 +8,29 @@
 
 ```
 lo admin
-  → lo serve 启动（127.0.0.1:8765）
+  → 启动 HTTP 服务（127.0.0.1:8765）
   → 托管 admin SPA（Vue 3 + Element Plus + TypeScript）
   → 自动打开浏览器 http://localhost:8765/admin/
+```
+
+```mermaid
+flowchart LR
+  subgraph 浏览器
+    SPA[Admin SPA]
+  end
+
+  subgraph lo 进程
+    HTTP[HTTP Server<br/>serve.cjs]
+    ADMIN[/api/admin/*<br/>管理端点/]
+    API[/api/*<br/>业务端点/]
+    DB[(SQLite)]
+    STG[staging_changes 表]
+  end
+
+  SPA -->|AJAX| ADMIN
+  ADMIN -->|走 Service 层| DB
+  ADMIN -->|commit via staging| STG
+  API -->|SSH auth| DB
 ```
 
 管理后台通过 HTTP API（`/api/admin/*`）与 lo 后端交互。服务仅监听 `127.0.0.1`，只有本机可访问，无需额外认证。
@@ -41,7 +61,7 @@ lo admin
 
 #### 关于元数据
 
-类型、标签、分类均为非独立实体——没有自己的数据库表，只是 `resources` 表 `metadata` 列中的字段值。重命名/删除操作本质上是批量 UPDATE resources。
+类型和分类仍为非独立实体（`resources` 表中的字段），标签已独立为 `resource_tags` 表。重命名/删除本质是批量 UPDATE。
 
 ### 示例
 

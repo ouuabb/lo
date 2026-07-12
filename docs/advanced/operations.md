@@ -76,7 +76,7 @@ lo 内置基于 chokidar 的文件监控器：
 
 > FileWatcher 的自动处理不会写入 sync_ops 操作日志。只有显式命令才会产生可跨设备同步的操作记录。
 
-### 暂存区（staging.json）
+### 暂存区（staging_changes 表）
 
 | 列表 | 含义 |
 |------|------|
@@ -91,7 +91,7 @@ lo 内置基于 chokidar 的文件监控器：
 ```
 用户操作 / 拖文件 / chokidar 事件
     │
-    ├─→ lo add/rm/mv/tag/category  ──→  staging.json
+    ├─→ lo add/rm/mv/tag/category  ──→  staging_changes 表
     │                                        │
     │                                   lo commit ──→ DB + sync_ops
     │

@@ -150,45 +150,56 @@ class ResourceService {
     }
 
     const now = Date.now();
+    if (preRid && !RidUtils.validate(preRid)) {
+      throw new Error(`非法的 preRid: ${preRid}，必须匹配 res_ 格式`);
+    }
     const rid = preRid || RidUtils.generate();
     const encrypted = alreadyEncrypted || !!this._cryptoKey;
 
     const cleanMeta = { ...metadata }; delete cleanMeta.tags;
-    await this.db.run(`
-      INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, container_schema, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(cleanMeta), encrypted ? 1 : 0,
-        JSON.stringify(container_schema), now, now]);
+    await this.db.run('SAVEPOINT tx_create');
+    try {
+      await this.db.run(`
+        INSERT INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, container_schema, created, updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [rid, name, layer, type, filePath, plainHash, JSON.stringify(cleanMeta), encrypted ? 1 : 0,
+          JSON.stringify(container_schema), now, now]);
 
-    // 同步写入 resource_tags
-    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-    for (const t of tags) {
-      if (t && t.trim()) {
-        await this.db.run(
-          'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
-          [rid, t.trim()]
-        );
-      }
-    }
-    // 同步写入 resource_capabilities
-    for (const c of capabilities) {
-      if (c && c.trim()) {
-        await this.db.run(
-          'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
-          [rid, c.trim()]
-        );
-      }
-    }
-    // 同步写入 container_ignore_patterns
-    if (container_schema && container_schema.ignored_patterns) {
-      for (const p of container_schema.ignored_patterns) {
-        if (p && p.trim()) {
+      // 同步写入 resource_tags
+      const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+      for (const t of tags) {
+        if (t && t.trim()) {
           await this.db.run(
-            'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
-            [rid, p.trim()]
+            'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+            [rid, t.trim()]
           );
         }
       }
+      // 同步写入 resource_capabilities
+      for (const c of capabilities) {
+        if (c && c.trim()) {
+          await this.db.run(
+            'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
+            [rid, c.trim()]
+          );
+        }
+      }
+      // 同步写入 container_ignore_patterns
+      if (container_schema && container_schema.ignored_patterns) {
+        for (const p of container_schema.ignored_patterns) {
+          if (p && p.trim()) {
+            await this.db.run(
+              'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
+              [rid, p.trim()]
+            );
+          }
+        }
+      }
+
+      await this.db.run('RELEASE tx_create');
+    } catch (e) {
+      await this.db.run('ROLLBACK TO tx_create');
+      throw e;
     }
 
     return { rid, name, layer, type, path: filePath, hash: plainHash, metadata, encrypted,
@@ -269,17 +280,15 @@ class ResourceService {
     const top = stack[1];
     const targetLayer = top.layer; // 栈顶原来的层号
 
-    // 三步交换，避免 UNIQUE(name,layer) 约束冲突：
-    // 1. 活跃层 → 临时负值，释放 layer=0
-    // 2. 栈顶   → layer=0
-    // 3. 旧活跃 → 栈顶原来的层号
-    await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [-1, active.rid]);
+    await this.db.run('SAVEPOINT tx_pop');
     try {
+      // 三步交换，避免 UNIQUE(name,layer) 约束冲突
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [-1, active.rid]);
       await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [0, top.rid]);
       await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [targetLayer, active.rid]);
+      await this.db.run('RELEASE tx_pop');
     } catch (e) {
-      // 回滚：将活跃层恢复到 layer=0
-      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [0, active.rid]);
+      await this.db.run('ROLLBACK TO tx_pop');
       throw e;
     }
 
@@ -365,83 +374,78 @@ class ResourceService {
   async update(rid, updates) {
     const { path, hash, metadata, capabilities, container_schema, type } = updates;
     
-    let sql = 'UPDATE resources SET updated = ?';
-    const params = [Date.now()];
-    
-    if (path) {
-      sql += ', path = ?';
-      params.push(path);
-    }
-    
-    if (hash) {
-      sql += ', hash = ?';
-      params.push(hash);
-    }
-    
-    if (metadata) {
-      const validated = assertMetadata(metadata, 'resourceService.update');
-      const { tags: _, ...cleanMeta } = validated;
-      sql += ', metadata = ?';
-      params.push(JSON.stringify(cleanMeta));
-    }
+    await this.db.run('SAVEPOINT tx_update');
+    try {
+      let sql = 'UPDATE resources SET updated = ?';
+      const params = [Date.now()];
+      
+      if (path) { sql += ', path = ?'; params.push(path); }
+      if (hash) { sql += ', hash = ?'; params.push(hash); }
+      if (metadata) {
+        const validated = assertMetadata(metadata, 'resourceService.update');
+        const { tags: _, ...cleanMeta } = validated;
+        sql += ', metadata = ?';
+        params.push(JSON.stringify(cleanMeta));
+      }
+      if (container_schema !== undefined) {
+        sql += ', container_schema = ?';
+        params.push(JSON.stringify(container_schema));
+      }
+      if (type !== undefined) { sql += ', type = ?'; params.push(type); }
+      
+      sql += ' WHERE rid = ? AND deleted = 0';
+      params.push(rid);
+      
+      const result = await this.db.run(sql, params);
+      if (result.changes === 0) {
+        await this.db.run('ROLLBACK TO tx_update');
+        throw new Error('Resource not found');
+      }
 
-    if (container_schema !== undefined) {
-      sql += ', container_schema = ?';
-      params.push(JSON.stringify(container_schema));
-    }
-
-    if (type !== undefined) {
-      sql += ', type = ?';
-      params.push(type);
-    }
-    
-    sql += ' WHERE rid = ? AND deleted = 0';
-    params.push(rid);
-    
-    const result = await this.db.run(sql, params);
-    
-    if (result.changes === 0) {
-      throw new Error('Resource not found');
-    }
-
-    // 同步 resource_tags
-    if (metadata && metadata.tags !== undefined) {
-      await this.db.run('DELETE FROM resource_tags WHERE resource_rid = ?', [rid]);
-      const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-      for (const t of tags) {
-        if (t && t.trim()) {
-          await this.db.run(
-            'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
-            [rid, t.trim()]
-          );
+      // 同步 resource_tags
+      if (metadata && metadata.tags !== undefined) {
+        await this.db.run('DELETE FROM resource_tags WHERE resource_rid = ?', [rid]);
+        const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+        for (const t of tags) {
+          if (t && t.trim()) {
+            await this.db.run(
+              'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
+              [rid, t.trim()]
+            );
+          }
         }
       }
-    }
-    // 同步 resource_capabilities
-    if (capabilities !== undefined) {
-      await this.db.run('DELETE FROM resource_capabilities WHERE resource_rid = ?', [rid]);
-      for (const c of capabilities) {
-        if (c && c.trim()) {
-          await this.db.run(
-            'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
-            [rid, c.trim()]
-          );
+      // 同步 resource_capabilities
+      if (capabilities !== undefined) {
+        await this.db.run('DELETE FROM resource_capabilities WHERE resource_rid = ?', [rid]);
+        for (const c of capabilities) {
+          if (c && c.trim()) {
+            await this.db.run(
+              'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
+              [rid, c.trim()]
+            );
+          }
         }
       }
-    }
-    // 同步 container_ignore_patterns
-    if (container_schema !== undefined) {
-      await this.db.run('DELETE FROM container_ignore_patterns WHERE container_rid = ?', [rid]);
-      const patterns = container_schema && container_schema.ignored_patterns
-        ? container_schema.ignored_patterns : [];
-      for (const p of patterns) {
-        if (p && p.trim()) {
-          await this.db.run(
-            'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
-            [rid, p.trim()]
-          );
+      // 同步 container_ignore_patterns
+      if (container_schema !== undefined) {
+        await this.db.run('DELETE FROM container_ignore_patterns WHERE container_rid = ?', [rid]);
+        const patterns = container_schema && container_schema.ignored_patterns
+          ? container_schema.ignored_patterns : [];
+        for (const p of patterns) {
+          if (p && p.trim()) {
+            await this.db.run(
+              'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
+              [rid, p.trim()]
+            );
+          }
         }
       }
+      
+      await this.db.run('RELEASE tx_update');
+    } catch (e) {
+      await this.db.run('ROLLBACK TO tx_update');
+      throw e;
     }
     
     return this.getByRid(rid);

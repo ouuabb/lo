@@ -17,7 +17,7 @@ lo backup 将仓库打包为 tar.gz 归档文件，保存在指定目录中。
 | `resources/` | 全部资源文件（保持 LOEC 加密状态）|
 | `.repo/database.sqlite` | SQLite 数据库（元数据、关系、提交历史）|
 | `.repo/config` | 仓库配置 |
-| `.repo/staging.json` | 暂存区（可选）|
+| `staging_changes` 表 | 暂存区（database.sqlite 内）|
 | `templates/` | 自定义模板目录 |
 
 备份排除：

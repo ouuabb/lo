@@ -955,7 +955,7 @@ route('DELETE', '/api/admin/relations/:id', async (req, res, { repo, url }) => {
   const id = parseInt(match[1]);
 
   try {
-    await repo.db.run('UPDATE relations SET deleted = 1 WHERE id = ?', [id]);
+    await repo.relationService.remove(id);
     jsonOk(res, { ok: true, deleted: id });
   } catch (e) {
     serverError(res, e.message);
@@ -1199,15 +1199,7 @@ route('PUT', '/api/admin/resources/:rid/tags', async (req, res, { repo, url }) =
   if (!Array.isArray(tags)) return badRequest(res, 'tags 必须是数组');
 
   try {
-    await repo.db.run('DELETE FROM resource_tags WHERE resource_rid = ?', [rid]);
-    for (const t of tags) {
-      if (t && t.trim()) {
-        await repo.db.run(
-          'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
-          [rid, t.trim()]
-        );
-      }
-    }
+    await repo.resourceService.update(rid, { metadata: { tags } });
     jsonOk(res, { ok: true, rid, tags });
   } catch (e) {
     serverError(res, e.message);
@@ -1224,10 +1216,10 @@ route('DELETE', '/api/admin/resources/:rid/tags/:tag', async (req, res, { repo, 
   if (!tag) return notFound(res, 'Invalid tag');
 
   try {
-    await repo.db.run(
-      'DELETE FROM resource_tags WHERE resource_rid = ? AND tag = ?',
-      [rid, tag]
-    );
+    const resource = await repo.resourceService.getByRid(rid);
+    if (!resource) return notFound(res, '资源不存在');
+    const currentTags = (resource.metadata.tags || []).filter(t => t !== tag);
+    await repo.resourceService.update(rid, { metadata: { tags: currentTags } });
     jsonOk(res, { ok: true, rid, tag });
   } catch (e) {
     serverError(res, e.message);
@@ -1248,18 +1240,24 @@ route('POST', '/api/admin/commit', async (req, res, { repo }) => {
   if (!message) return badRequest(res, '缺少 message 字段');
 
   try {
-    // 使用 StagingArea 提交当前暂存的变更
-    const StagingArea = require('../repo/staging.cjs');
-    const staging = new StagingArea(repo.repoPath);
+    // 使用已初始化（已注入 db）的 staging 实例
+    const staging = repo.staging;
 
     if (!(await staging.hasChanges())) {
       return jsonOk(res, { error: '没有待提交的变更' }, 400);
     }
 
-    const stagingResult = await staging.commit(repo);
-    await repo.commit(message, stagingResult);
-    await repo.createCommit(message);
-    await repo.sync({ silent: true });
+    await repo.db.run('SAVEPOINT tx_admin_commit');
+    try {
+      const stagingResult = await staging.commit(repo);
+      await repo.commit(message, stagingResult);
+      await repo.createCommit(message);
+      await repo.sync({ silent: true });
+      await repo.db.run('RELEASE tx_admin_commit');
+    } catch (innerErr) {
+      await repo.db.run('ROLLBACK TO tx_admin_commit');
+      throw innerErr;
+    }
 
     jsonOk(res, { ok: true, message, result: stagingResult });
   } catch (e) {
@@ -1271,10 +1269,7 @@ route('POST', '/api/admin/commit', async (req, res, { repo }) => {
 
 route('GET', '/api/admin/status', async (req, res, { repo }) => {
   try {
-    const StagingArea = require('../repo/staging.cjs');
-    const staging = new StagingArea(repo.repoPath);
-
-    const status = await staging.getStatus();
+    const status = await repo.staging.getStatus();
     const commits = await repo.getCommitLog();
 
     jsonOk(res, {
@@ -1434,11 +1429,17 @@ route('PUT', '/api/admin/types/:name', async (req, res, { repo, url }) => {
   if (!newType) return badRequest(res, '缺少 newType 字段');
 
   try {
-    const result = await repo.db.run(
-      'UPDATE resources SET type = ? WHERE type = ? AND deleted = 0',
-      [newType, oldType]
+    // 走 Service 层，逐资源更新以生成 syncOp
+    const resources = await repo.db.all(
+      'SELECT rid FROM resources WHERE type = ? AND deleted = 0',
+      [oldType]
     );
-    jsonOk(res, { ok: true, oldType, newType, affected: result.changes });
+    let affected = 0;
+    for (const r of resources) {
+      await repo.resourceService.update(r.rid, { type: newType });
+      affected++;
+    }
+    jsonOk(res, { ok: true, oldType, newType, affected });
   } catch (e) {
     serverError(res, e.message);
   }
@@ -1472,23 +1473,12 @@ route('PUT', '/api/admin/tags/:name', async (req, res, { repo, url }) => {
   if (!newTag) return badRequest(res, '缺少 newTag 字段');
 
   try {
-    // 重命名标签：更新 resource_tags 表
-    const rows = await repo.db.all(
-      'SELECT resource_rid FROM resource_tags WHERE tag = ?', [oldTag]
+    // 标签是独立表，一条 SQL 完成重命名
+    const result = await repo.db.run(
+      'UPDATE resource_tags SET tag = ? WHERE tag = ?',
+      [newTag, oldTag]
     );
-    let affected = 0;
-    for (const row of rows) {
-      await repo.db.run(
-        'DELETE FROM resource_tags WHERE resource_rid = ? AND tag = ?',
-        [row.resource_rid, oldTag]
-      );
-      await repo.db.run(
-        'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
-        [row.resource_rid, newTag]
-      );
-      affected++;
-    }
-    jsonOk(res, { ok: true, oldTag, newTag, affected });
+    jsonOk(res, { ok: true, oldTag, newTag, affected: result.changes });
   } catch (e) {
     serverError(res, e.message);
   }
@@ -1545,11 +1535,14 @@ route('PUT', '/api/admin/categories/:name', async (req, res, { repo, url }) => {
   if (!newCategory) return badRequest(res, '缺少 newCategory 字段');
 
   try {
-    const result = await repo.db.run(
-      "UPDATE resources SET metadata = json_set(metadata, '$.category', ?) WHERE json_extract(metadata, '$.category') = ? AND deleted = 0 AND type != 'system'",
-      [newCategory, oldCat]
+    const resources = await repo.db.all(
+      "SELECT rid FROM resources WHERE json_extract(metadata, '$.category') = ? AND deleted = 0 AND type != 'system'",
+      [oldCat]
     );
-    jsonOk(res, { ok: true, oldCategory: oldCat, newCategory, affected: result.changes });
+    for (const r of resources) {
+      await repo.resourceService.update(r.rid, { metadata: { category: newCategory } });
+    }
+    jsonOk(res, { ok: true, oldCategory: oldCat, newCategory, affected: resources.length });
   } catch (e) {
     serverError(res, e.message);
   }
@@ -1561,11 +1554,14 @@ route('DELETE', '/api/admin/categories/:name', async (req, res, { repo, url }) =
   const cat = decodeURIComponent(match[1]);
 
   try {
-    const result = await repo.db.run(
-      "UPDATE resources SET metadata = json_set(metadata, '$.category', '') WHERE json_extract(metadata, '$.category') = ? AND deleted = 0 AND type != 'system'",
+    const resources = await repo.db.all(
+      "SELECT rid FROM resources WHERE json_extract(metadata, '$.category') = ? AND deleted = 0 AND type != 'system'",
       [cat]
     );
-    jsonOk(res, { ok: true, category: cat, affected: result.changes });
+    for (const r of resources) {
+      await repo.resourceService.update(r.rid, { metadata: { category: '' } });
+    }
+    jsonOk(res, { ok: true, category: cat, affected: resources.length });
   } catch (e) {
     serverError(res, e.message);
   }

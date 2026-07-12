@@ -8,33 +8,52 @@
  *   + relations
  *   + history
  *   + confidence
+ *
+ * 唯一数据源: ai_concepts 表
  */
 
 class ConceptMemory {
-  constructor() {
-    /** @type {Map<string, object>} */
-    this._concepts = new Map();
+  /**
+   * @param {object} db - Database 实例
+   */
+  constructor(db) {
+    this._db = db;
   }
 
   /**
    * 保存或更新概念
    */
   save(concept) {
-    const existing = this._concepts.get(concept.name);
+    const name = concept.name;
+    if (!name) return null;
+
+    const existing = this._db.get('SELECT * FROM ai_concepts WHERE name = ?', [name]);
+    const meta = existing ? JSON.parse(existing.metadata || '{}') : {};
+    const history = meta.history || [];
+
     if (existing) {
-      existing.meaning = concept.meaning || existing.meaning;
-      existing.confidence = Math.max(existing.confidence, concept.confidence || 0);
-      existing.relations = concept.relations || existing.relations;
-      existing.history = [...(existing.history || []), { action: 'updated', at: Date.now() }];
+      const meaning = concept.meaning || existing.meaning;
+      const confidence = Math.max(existing.confidence, concept.confidence || 0);
+      const relations = concept.relations ? JSON.stringify(concept.relations) : existing.relations;
+      history.push({ action: 'updated', at: Date.now() });
+
+      this._db.run(
+        `UPDATE ai_concepts SET meaning = ?, confidence = ?, relations = ?, metadata = ?, created_at = ? WHERE name = ?`,
+        [meaning, confidence, relations, JSON.stringify({ ...meta, history }), Date.now(), name]
+      );
+      return { name, meaning, relations: concept.relations || JSON.parse(existing.relations || '[]'), confidence, history };
     } else {
-      this._concepts.set(concept.name, {
-        name: concept.name,
-        meaning: concept.meaning || '',
-        relations: concept.relations || [],
-        confidence: concept.confidence || 0.5,
-        history: [{ action: 'created', at: Date.now() }],
-        createdAt: Date.now()
-      });
+      history.push({ action: 'created', at: Date.now() });
+      const meaning = concept.meaning || '';
+      const confidence = concept.confidence || 0.5;
+      const relations = JSON.stringify(concept.relations || []);
+      const now = Date.now();
+
+      this._db.run(
+        `INSERT INTO ai_concepts (name, meaning, confidence, relations, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        [name, meaning, confidence, relations, JSON.stringify({ history }), now]
+      );
+      return { name, meaning, relations: concept.relations || [], confidence, history };
     }
   }
 
@@ -42,38 +61,50 @@ class ConceptMemory {
    * 搜索概念
    */
   async search(query, limit = 5) {
-    const q = query.toLowerCase();
-    const results = [];
-
-    for (const [name, concept] of this._concepts) {
-      if (name.toLowerCase().includes(q) || (concept.meaning || '').toLowerCase().includes(q)) {
-        results.push(concept);
-      }
-    }
-
-    // 按 confidence 排序
-    results.sort((a, b) => b.confidence - a.confidence);
-    return results.slice(0, limit);
+    const q = `%${query.toLowerCase()}%`;
+    const rows = this._db.all(
+      `SELECT * FROM ai_concepts WHERE LOWER(name) LIKE ? OR LOWER(meaning) LIKE ? ORDER BY confidence DESC LIMIT ?`,
+      [q, q, limit]
+    );
+    return rows.map(r => this._hydrate(r));
   }
 
   get(name) {
-    return this._concepts.get(name) || null;
+    const row = this._db.get('SELECT * FROM ai_concepts WHERE name = ?', [name]);
+    return row ? this._hydrate(row) : null;
   }
 
   count() {
-    return this._concepts.size;
+    const row = this._db.get('SELECT COUNT(*) as c FROM ai_concepts');
+    return row.c;
   }
 
   list(limit = 50) {
-    return Array.from(this._concepts.values()).slice(0, limit);
+    const rows = this._db.all('SELECT * FROM ai_concepts ORDER BY confidence DESC LIMIT ?', [limit]);
+    return rows.map(r => this._hydrate(r));
   }
 
   stats() {
-    const values = Array.from(this._concepts.values());
-    const avgConfidence = values.length > 0
-      ? values.reduce((s, c) => s + c.confidence, 0) / values.length
-      : 0;
-    return { conceptCount: values.length, avgConfidence: Math.round(avgConfidence * 100) / 100 };
+    const row = this._db.get('SELECT COUNT(*) as c, AVG(confidence) as avg FROM ai_concepts');
+    return {
+      conceptCount: row.c,
+      avgConfidence: Math.round((row.avg || 0) * 100) / 100
+    };
+  }
+
+  _hydrate(row) {
+    let relations = [];
+    try { relations = JSON.parse(row.relations || '[]'); } catch {}
+    let metadata = {};
+    try { metadata = JSON.parse(row.metadata || '{}'); } catch {}
+    return {
+      name: row.name,
+      meaning: row.meaning || '',
+      relations,
+      confidence: row.confidence,
+      history: metadata.history || [],
+      createdAt: row.created_at
+    };
   }
 }
 

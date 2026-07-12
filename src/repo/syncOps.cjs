@@ -1,7 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs-extra');
-const RidUtils = require('../utils/rid.cjs');
 const Logger = require('../utils/logger.cjs');
 const { assertMetadata } = require('../utils/validateMetadata.cjs');
 
@@ -257,8 +256,8 @@ class SyncOpsEngine {
             };
           }
 
-          // 远程版本入栈
-          const stackRid = RidUtils.generate();
+          // 远程版本入栈，使用确定性 RID 避免身份分叉
+          const stackRid = `${rid}_stack_${targetLayer}`;
           const remoteMeta = data.metadata
             ? (typeof data.metadata === 'string' ? JSON.parse(data.metadata) : data.metadata)
             : {};

@@ -7,7 +7,7 @@ lo 内置类似 Git 的版本控制工作流。
 ```
   文件系统              暂存区              仓库历史
 ┌──────────┐       ┌──────────────┐       ┌──────────┐
-│ resources/ │  lo   │ staging.json │  lo    │ commits  │
+│ resources/ │  lo   │ staging_changes │ lo   │ commits  │
 │ 文件变更   │ ────► │  暂存列表     │ ────► │ 表       │
 └──────────┘  add  └──────────────┘ commit └──────────┘
 ```
@@ -33,7 +33,7 @@ lo 内置类似 Git 的版本控制工作流。
 - `timestamp`：时间戳
 - `added / updated / deleted / renamed / metadata`：变更统计
 
-### 暂存模型（staging.json）
+### 暂存模型（staging_changes 表）
 
 | 列表 | 含义 |
 |------|------|

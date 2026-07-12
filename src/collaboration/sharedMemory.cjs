@@ -10,12 +10,16 @@
  *   result       — 结果
  *
  * 作用域: team | team.task | global
+ *
+ * 唯一数据源: shared_memory 表
  */
 
 class SharedMemory {
-  constructor() {
-    /** @type {Map<string, Array>} */
-    this._store = new Map();
+  /**
+   * @param {object} db - Database 实例
+   */
+  constructor(db) {
+    this._db = db;
   }
 
   /**
@@ -23,45 +27,52 @@ class SharedMemory {
    * @param {{ scope: string, type: string, content: any, owner?: string, visibility?: string }} entry
    */
   write({ scope, type, content, owner, visibility }) {
-    const id = `sm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    const entry = {
-      id,
-      scope: scope || 'team',
-      type: type || 'knowledge',
+    const entryId = `sm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const scopeVal = scope || 'team';
+    const typeVal = type || 'knowledge';
+    const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+    const ownerVal = owner || 'system';
+    const visibilityVal = visibility || 'all';
+    const createdAt = Date.now();
+
+    this._db.run(
+      `INSERT INTO shared_memory (entry_id, scope, type, content, owner, visibility, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [entryId, scopeVal, typeVal, contentStr, ownerVal, visibilityVal, createdAt]
+    );
+
+    return {
+      id: entryId,
+      scope: scopeVal,
+      type: typeVal,
       content,
-      owner: owner || 'system',
-      visibility: visibility || 'all',
-      createdAt: Date.now()
+      owner: ownerVal,
+      visibility: visibilityVal,
+      createdAt
     };
-
-    const key = `${scope}:${type}`;
-    if (!this._store.has(key)) {
-      this._store.set(key, []);
-    }
-    this._store.get(key).push(entry);
-
-    return entry;
   }
 
   /**
    * 查询共享记忆
    */
   read({ scope, type, limit = 20 }) {
-    const results = [];
+    let sql = 'SELECT * FROM shared_memory WHERE 1=1';
+    const params = [];
 
-    for (const [key, entries] of this._store) {
-      // scope:type 匹配或 scope:* 匹配
-      const matches = (!scope || key.startsWith(scope + ':')) &&
-                      (!type || key.endsWith(':' + type));
-
-      if (matches) {
-        results.push(...entries.slice(-limit));
-      }
+    if (scope) {
+      sql += ' AND scope LIKE ?';
+      params.push(`${scope}%`);
+    }
+    if (type) {
+      sql += ' AND type = ?';
+      params.push(type);
     }
 
-    // 按时间倒序
-    results.sort((a, b) => b.createdAt - a.createdAt);
-    return results.slice(0, limit);
+    sql += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(limit);
+
+    const rows = this._db.all(sql, params);
+    return rows.map(r => this._hydrate(r));
   }
 
   /**
@@ -69,13 +80,9 @@ class SharedMemory {
    */
   clear(scope) {
     if (scope) {
-      for (const key of this._store.keys()) {
-        if (key.startsWith(scope + ':')) {
-          this._store.delete(key);
-        }
-      }
+      this._db.run('DELETE FROM shared_memory WHERE scope LIKE ?', [`${scope}%`]);
     } else {
-      this._store.clear();
+      this._db.run('DELETE FROM shared_memory');
     }
   }
 
@@ -83,11 +90,23 @@ class SharedMemory {
    * 统计
    */
   stats() {
-    let count = 0;
-    for (const entries of this._store.values()) {
-      count += entries.length;
-    }
-    return { entryCount: count, scopeCount: this._store.size };
+    const total = this._db.get('SELECT COUNT(*) as c FROM shared_memory');
+    const scopes = this._db.get('SELECT COUNT(DISTINCT scope) as c FROM shared_memory');
+    return { entryCount: total.c, scopeCount: scopes.c };
+  }
+
+  _hydrate(row) {
+    let content = row.content;
+    try { content = JSON.parse(row.content); } catch {}
+    return {
+      id: row.entry_id,
+      scope: row.scope,
+      type: row.type,
+      content,
+      owner: row.owner,
+      visibility: row.visibility,
+      createdAt: row.created_at
+    };
   }
 }
 
