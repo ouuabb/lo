@@ -63,7 +63,9 @@ export default {
             { text: '知识智能体', link: '/systems/agent' },
             { text: '多智能体协作', link: '/systems/collaboration' },
             { text: 'AI 原生知识 OS', link: '/systems/ai-os' },
-            { text: '知识系统自演化', link: '/systems/evolution' }
+            { text: '知识系统自演化', link: '/systems/evolution' },
+            { text: '权限与安全系统', link: '/systems/security' },
+            { text: 'Knowledge Runtime', link: '/systems/runtime' }
           ]
         }
       ],
@@ -126,6 +128,8 @@ export default {
             { text: 'team — 团队协作', link: '/commands/team' },
             { text: 'ai — AI 知识 OS', link: '/commands/ai' },
             { text: 'evolution — 自演化', link: '/commands/evolution' },
+            { text: 'security — 安全系统', link: '/commands/security' },
+            { text: 'runtime — Runtime', link: '/commands/runtime' },
             { text: 'knowledge — 知识智能', link: '/commands/knowledge' },
             { text: 'suggestion — AI 建议', link: '/commands/suggestion' },
             { text: 'automation — 自动化', link: '/commands/automation' },
