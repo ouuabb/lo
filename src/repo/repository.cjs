@@ -66,6 +66,7 @@ const CollaborationMemory = require('../collaboration/collaborationMemory.cjs');
 const SharedMemory = require('../collaboration/sharedMemory.cjs');
 const MessageBus = require('../collaboration/messageBus.cjs');
 const AIOS = require('../ai/aiOS.cjs');
+const EvolutionEngine = require('../evolution/evolutionEngine.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2709,6 +2710,75 @@ class Repository {
       concepts: obs.concepts,
       learning: obs.learning
     };
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.8: Knowledge OS Self-Evolution
+  // ──────────────────────────────────────
+
+  _getEvolutionEngine() {
+    if (!this._evolutionEngine) {
+      this._evolutionEngine = new EvolutionEngine({
+        repository: this,
+        graphEngine: this._getGraphEngine ? this._getGraphEngine() : null,
+        agentEngine: this._getAgentEngine ? this._getAgentEngine() : null,
+        workflowEngine: this._getWorkflowEngine ? this._getWorkflowEngine() : null,
+        eventBus: this._getEventBus(),
+        logger: this.logger || console
+      });
+    }
+    return this._evolutionEngine;
+  }
+
+  async initEvolutionEngine() {
+    const engine = this._getEvolutionEngine();
+    engine.start();
+    return engine;
+  }
+
+  async observeSystem() {
+    const engine = this._getEvolutionEngine();
+    return engine.observe();
+  }
+
+  async analyzeHealth() {
+    const engine = this._getEvolutionEngine();
+    const snapshot = await engine.observe();
+    return engine.healthAnalyzer.analyze(snapshot);
+  }
+
+  async detectEvolution() {
+    const engine = this._getEvolutionEngine();
+    const snapshot = await engine.observe();
+    const health = await engine.healthAnalyzer.analyze(snapshot);
+    return engine.detector.detect(snapshot, health);
+  }
+
+  async generateEvolutionPlan() {
+    const engine = this._getEvolutionEngine();
+    const opportunities = await this.detectEvolution();
+    const strategies = engine.strategy.generate(opportunities);
+    return engine.planner.plan(strategies);
+  }
+
+  async executeEvolution() {
+    const engine = this._getEvolutionEngine();
+    return engine.evolve();
+  }
+
+  async getEvolutionHistory(limit) {
+    const engine = this._getEvolutionEngine();
+    return engine.history(limit);
+  }
+
+  async getEvolutionStatus() {
+    const engine = this._getEvolutionEngine();
+    return engine.status();
+  }
+
+  async rollbackEvolution() {
+    const engine = this._getEvolutionEngine();
+    return engine.rollback();
   }
 
   async exportGraph(format = 'json', options = {}) {

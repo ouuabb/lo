@@ -318,6 +318,9 @@ class Database {
 
     // V20: AI Native Knowledge OS（Phase 6.7）
     await this._migrateAIV20();
+
+    // V21: Knowledge OS Self-Evolution（Phase 6.8）
+    await this._migrateEvolutionV21();
   }
 
   run(sql, params = []) {
@@ -1222,6 +1225,56 @@ class Database {
       `);
     } catch (e) {
       console.error('[migrate] AI V20 失败:', e.message);
+    }
+  }
+
+  /**
+   * V21: Phase 6.8 Knowledge OS Self-Evolution
+   *   evolution_states  — 进化状态快照
+   *   evolution_actions — 进化执行记录
+   *   evolution_history — 进化历史
+   */
+  async _migrateEvolutionV21() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS evolution_states (
+          id TEXT PRIMARY KEY,
+          version TEXT,
+          health REAL,
+          complexity REAL,
+          connectivity REAL,
+          maturity TEXT,
+          snapshot TEXT,
+          score INTEGER,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS evolution_actions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT,
+          strategy TEXT,
+          action TEXT,
+          status TEXT,
+          result TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS evolution_history (
+          id TEXT PRIMARY KEY,
+          before_state TEXT,
+          after_state TEXT,
+          action TEXT,
+          improvement REAL,
+          result TEXT,
+          created_at INTEGER
+        )
+      `);
+    } catch (e) {
+      console.error('[migrate] Evolution V21 失败:', e.message);
     }
   }
 

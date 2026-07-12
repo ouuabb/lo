@@ -2558,6 +2558,183 @@ async function aiMemoryHandler() {
   }
 }
 
+// ═══════════ Phase 6.8: Evolution Handlers ═══════════
+
+/**
+ * lo evolution status
+ */
+async function evoStatusHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initEvolutionEngine();
+
+    const status = await repo.getEvolutionStatus();
+
+    console.log(chalk.bold.cyan('\n  Knowledge OS Evolution'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    const s = status.state;
+    console.log(`  ${chalk.cyan('Version:')}      ${s.version}`);
+    console.log(`  ${chalk.cyan('Maturity:')}     ${s.maturity}`);
+    console.log(`  ${chalk.cyan('Health:')}       ${status.health ? status.health.healthScore : '?'}%`);
+    console.log(`  ${chalk.cyan('Connectivity:')}  ${s.connectivity}`);
+    console.log(`  ${chalk.cyan('Complexity:')}   ${s.complexity}`);
+    console.log(`  ${chalk.cyan('Score:')}        ${s.score}`);
+
+    if (status.health && status.health.issues && status.health.issues.length > 0) {
+      console.log(`\n  ${chalk.cyan('Issues:')}`);
+      for (const issue of status.health.issues) {
+        const sev = issue.severity === 'high' ? chalk.red : issue.severity === 'medium' ? chalk.yellow : chalk.gray;
+        console.log(`    ${sev(issue.type.padEnd(22))}  ${issue.description || ''}`);
+      }
+    }
+
+    if (status.health && status.health.recommendations && status.health.recommendations.length > 0) {
+      console.log(`\n  ${chalk.cyan('Recommendations:')}`);
+      for (const rec of status.health.recommendations) {
+        console.log(`    ${chalk.gray('›')} ${rec.action}${rec.target ? ` (${rec.target})` : ''}`);
+      }
+    }
+
+    console.log(`\n  ${chalk.cyan('Evolution Memory:')}`);
+    console.log(`    Evolutions:     ${status.memory.totalEvolutions}`);
+    console.log(`    Avg Improvement: ${status.memory.avgImprovement}`);
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`进化状态查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo evolution analyze
+ */
+async function evoAnalyzeHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initEvolutionEngine();
+
+    const diagnosis = await repo._getEvolutionEngine().diagnose();
+
+    console.log(chalk.bold.cyan('\n  Evolution Diagnosis'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    console.log(`  ${chalk.cyan('State:')}`);
+    console.log(`    Health:       ${diagnosis.state.health}`);
+    console.log(`    Connectivity: ${diagnosis.state.connectivity}`);
+    console.log(`    Maturity:     ${diagnosis.state.maturity}`);
+
+    if (diagnosis.health.issues.length > 0) {
+      console.log(`\n  ${chalk.cyan('Issues:')}`);
+      for (const i of diagnosis.health.issues) {
+        console.log(`    ${chalk.yellow('!')} ${i.type}: ${i.description || ''} (${i.severity})`);
+      }
+    }
+
+    if (diagnosis.opportunities.length > 0) {
+      console.log(`\n  ${chalk.cyan('Evolution Opportunities:')}`);
+      for (const o of diagnosis.opportunities) {
+        console.log(`    ${chalk.green('+')} ${o.type} [${o.priority}]`);
+      }
+    }
+
+    if (diagnosis.strategies.length > 0) {
+      console.log(`\n  ${chalk.cyan('Strategies:')}`);
+      for (const s of diagnosis.strategies) {
+        console.log(`    ${chalk.cyan(s.type.padEnd(12))}  ${s.description}  [${s.priority}]`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`进化分析失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo evolution run
+ */
+async function evoRunHandler() {
+  try {
+    console.log(chalk.gray('\n  运行自我改进循环...\n'));
+
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initEvolutionEngine();
+
+    const result = await repo.executeEvolution();
+
+    console.log(chalk.bold.cyan('\n  Evolution Result'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (result.evolved) {
+      console.log(`  ${chalk.green('Evolution completed')}`);
+      console.log(`  ${chalk.cyan('Improvement:')} +${result.validation ? result.validation.improvement : '?'}`);
+      console.log(`  ${chalk.cyan('Before:')}      health=${result.before.health}, score=${result.before.score}`);
+      console.log(`  ${chalk.cyan('After:')}       health=${result.after.health}, score=${result.after.score}`);
+
+      if (result.results) {
+        console.log(`\n  ${chalk.cyan('Steps executed:')} ${result.results.length}`);
+        for (const r of result.results) {
+          const icon = r.status === 'completed' ? chalk.green('✓') : r.status === 'denied' ? chalk.red('✗') : chalk.yellow('?');
+          console.log(`    ${icon} ${r.action} → ${r.status}`);
+        }
+      }
+    } else {
+      console.log(`  ${chalk.gray('No evolution needed:')} ${result.reason}`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`进化执行失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo evolution history
+ */
+async function evoHistoryHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initEvolutionEngine();
+
+    const history = await repo.getEvolutionHistory(20);
+
+    console.log(chalk.bold.cyan('\n  Evolution History'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (history.length === 0) {
+      console.log(chalk.gray('  No evolution history yet.'));
+    } else {
+      for (const h of history) {
+        const improvement = h.improvement > 0 ? chalk.green(`+${h.improvement}`) : chalk.gray(String(h.improvement));
+        const time = new Date(h.createdAt).toLocaleString();
+        console.log(`  ${chalk.cyan(h.id)}  ${improvement}  ${chalk.gray(time)}`);
+        console.log(`    ${h.action}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`进化历史查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -2627,5 +2804,9 @@ module.exports = {
   aiAsk: aiAskHandler,
   aiAnalyze: aiAnalyzeHandler,
   aiInsights: aiInsightsHandler,
-  aiMemory: aiMemoryHandler
+  aiMemory: aiMemoryHandler,
+  evoStatus: evoStatusHandler,
+  evoAnalyze: evoAnalyzeHandler,
+  evoRun: evoRunHandler,
+  evoHistory: evoHistoryHandler
 };

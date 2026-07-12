@@ -896,6 +896,15 @@ cli
       .demandCommand(1, '请指定 AI 子命令。可用: status, ask, analyze, insights, memory');
   })
 
+  .command('evolution', '知识系统自演化（Phase 6.8）', (yargs) => {
+    yargs
+      .command('status', '查看进化状态', {}, graphCmd.evoStatus)
+      .command('analyze', '分析系统并诊断问题', {}, graphCmd.evoAnalyze)
+      .command('run', '执行自我改进循环', {}, graphCmd.evoRun)
+      .command('history', '查看进化历史', {}, graphCmd.evoHistory)
+      .demandCommand(1, '请指定 Evolution 子命令。可用: status, analyze, run, history');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {
