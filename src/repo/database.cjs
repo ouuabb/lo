@@ -297,6 +297,9 @@ class Database {
 
     // V13: knowledge_snapshots（Phase 5.11）
     await this._migrateEvolutionV13();
+
+    // V14: plugin system（Phase 6.1）
+    await this._migratePluginV14();
   }
 
   run(sql, params = []) {
@@ -908,6 +911,37 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_snapshots_created ON knowledge_snapshots(created_at)`);
     } catch (e) {
       console.error('[migrate] Evolution V13 失败:', e.message);
+    }
+  }
+
+  /**
+   * V14: Phase 6.1 Plugin System
+   *   plugins         — 插件注册记录
+   *   plugin_settings — 插件独立配置
+   */
+  async _migratePluginV14() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS plugins (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          version TEXT,
+          enabled INTEGER DEFAULT 1,
+          installed_at INTEGER,
+          updated_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS plugin_settings (
+          plugin_id TEXT,
+          key TEXT,
+          value TEXT,
+          PRIMARY KEY (plugin_id, key)
+        )
+      `);
+    } catch (e) {
+      console.error('[migrate] Plugin V14 失败:', e.message);
     }
   }
 

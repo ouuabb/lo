@@ -1,0 +1,14 @@
+{
+  "id": "markdown",
+  "name": "Markdown Plugin",
+  "version": "1.0.0",
+  "description": "Built-in markdown resource type handler",
+  "author": "lo",
+  "main": "index.js",
+  "dependencies": [],
+  "contributes": {
+    "resourceTypes": ["markdown"],
+    "commands": ["markdown.export", "markdown.stats"],
+    "exporters": ["markdown"]
+  }
+}

@@ -41,6 +41,7 @@ const KnowledgePatternEngine = require('./knowledgePatternEngine.cjs');
 const KnowledgeStrategyEngine = require('./knowledgeStrategyEngine.cjs');
 const CollectiveKnowledgeEngine = require('./collectiveKnowledgeEngine.cjs');
 const EvolutionMemory = require('./evolutionMemory.cjs');
+const PluginManager = require('../plugin/pluginManager.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2028,6 +2029,92 @@ class Repository {
   async compareSnapshots(snapshotId) {
     const em = this.getEvolutionMemory();
     return em.compare(snapshotId);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.1: Plugin System
+  // ──────────────────────────────────────
+
+  /**
+   * 获取 PluginManager（懒初始化）
+   */
+  getPluginManager() {
+    if (!this._pluginManager) {
+      this._pluginManager = new PluginManager({
+        pluginsDir: path.join(__dirname, '..', 'plugins'),
+        repository: this,
+        db: this.db
+      });
+    }
+    return this._pluginManager;
+  }
+
+  /**
+   * 初始化插件系统
+   */
+  async initPluginSystem() {
+    const pm = this.getPluginManager();
+    await pm.initialize();
+    return pm.listPlugins();
+  }
+
+  /**
+   * 列出插件
+   */
+  async listPlugins() {
+    const pm = this.getPluginManager();
+    return pm.listPlugins();
+  }
+
+  /**
+   * 安装插件
+   */
+  async installPlugin(pluginPath) {
+    const pm = this.getPluginManager();
+    return pm.loadPlugin(pluginPath);
+  }
+
+  /**
+   * 卸载插件
+   */
+  async uninstallPlugin(id) {
+    const pm = this.getPluginManager();
+    return pm.unloadPlugin(id);
+  }
+
+  /**
+   * 启用插件
+   */
+  async enablePlugin(id) {
+    const pm = this.getPluginManager();
+    return pm.enablePlugin(id);
+  }
+
+  /**
+   * 禁用插件
+   */
+  async disablePlugin(id) {
+    const pm = this.getPluginManager();
+    return pm.disablePlugin(id);
+  }
+
+  /**
+   * 重载插件
+   */
+  async reloadPlugin(id) {
+    const pm = this.getPluginManager();
+    return pm.reloadPlugin(id);
+  }
+
+  /**
+   * 获取插件管理器 Hook/Action
+   */
+  getPluginHookManager() {
+    return this.getPluginManager().getHookManager();
+  }
+
+  getPluginExtensionRegistry() {
+    return this.getPluginManager().getExtensionRegistry();
   }
 
   async exportGraph(format = 'json', options = {}) {

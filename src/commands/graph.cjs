@@ -1527,6 +1527,165 @@ async function knowledgeSnapshotHandler() {
   }
 }
 
+// ═══════════ Phase 6.1: Plugin System Handlers ═══════════
+
+/**
+ * lo plugin list
+ */
+async function pluginListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    await repo.initPluginSystem();
+    const plugins = await repo.listPlugins();
+
+    console.log(chalk.bold.cyan('\n  Plugins'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (plugins.length === 0) {
+      console.log(chalk.gray('  No plugins loaded.'));
+    } else {
+      for (const p of plugins) {
+        const stateIcon = p.state === 'enabled' ? chalk.green('enabled') :
+                           p.state === 'disabled' ? chalk.yellow('disabled') : chalk.gray(p.state);
+        console.log(`  ${chalk.cyan(p.id.padEnd(15))}  ${p.name}`);
+        console.log(`    ${chalk.gray('v' + p.version.padEnd(10))}  ${stateIcon}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`插件列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo plugin enable <id>
+ */
+async function pluginEnableHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    await repo.enablePlugin(argv.id);
+
+    console.log(chalk.green(`\n  Plugin '${argv.id}' enabled.\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`插件启用失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo plugin disable <id>
+ */
+async function pluginDisableHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    await repo.disablePlugin(argv.id);
+
+    console.log(chalk.yellow(`\n  Plugin '${argv.id}' disabled.\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`插件禁用失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo plugin reload <id>
+ */
+async function pluginReloadHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    await repo.reloadPlugin(argv.id);
+
+    console.log(chalk.green(`\n  Plugin '${argv.id}' reloaded.\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`插件重载失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo plugin info <id>
+ */
+async function pluginInfoHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    await repo.initPluginSystem();
+    const pm = repo.getPluginManager();
+    const plugin = pm.getPlugin(argv.id);
+
+    if (!plugin) {
+      console.log(chalk.red(`\n  Plugin '${argv.id}' not found.\n`));
+    } else {
+      const manifest = plugin.manifest();
+      console.log(chalk.bold.cyan(`\n  ${plugin.name}`));
+      console.log(chalk.gray('  ───────────────────────────────'));
+      console.log(`  ID:       ${chalk.cyan(plugin.id)}`);
+      console.log(`  Version:  ${manifest.version || '?'}`);
+      console.log(`  State:    ${plugin.state === 'enabled' ? chalk.green(plugin.state) : chalk.yellow(plugin.state)}`);
+
+      if (manifest.dependencies && manifest.dependencies.length > 0) {
+        console.log(`  Deps:     ${manifest.dependencies.join(', ')}`);
+      }
+
+      if (manifest.contributes) {
+        const contributes = manifest.contributes;
+        const types = Object.keys(contributes).filter(k => contributes[k] && contributes[k].length > 0);
+        if (types.length > 0) {
+          console.log(`  Contributes:`);
+          for (const t of types) {
+            console.log(`    ${t}: ${Array.isArray(contributes[t]) ? contributes[t].join(', ') : contributes[t]}`);
+          }
+        }
+      }
+
+      // 扩展注册信息
+      const extRegistry = repo.getPluginExtensionRegistry();
+      for (const extType of extRegistry.types()) {
+        const exts = extRegistry.list(extType).filter(e => e.pluginId === argv.id);
+        if (exts.length > 0) {
+          console.log(`  [${extType}]: ${exts.map(e => e.key).join(', ')}`);
+        }
+      }
+
+      // Hook 信息
+      const hooks = repo.getPluginHookManager();
+      const hookCount = hooks.hookNames()
+        .map(n => hooks.listenerCount(n))
+        .reduce((a, b) => a + b, 0);
+      if (hookCount > 0) {
+        console.log(`  Hooks:     ${hookCount} registered`);
+      }
+
+      console.log('');
+    }
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`插件信息失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -1566,5 +1725,10 @@ module.exports = {
   knowledgeEvolution: knowledgeEvolutionHandler,
   knowledgePatterns: knowledgePatternsHandler,
   knowledgeStrategy: knowledgeStrategyHandler,
-  knowledgeSnapshot: knowledgeSnapshotHandler
+  knowledgeSnapshot: knowledgeSnapshotHandler,
+  pluginList: pluginListHandler,
+  pluginEnable: pluginEnableHandler,
+  pluginDisable: pluginDisableHandler,
+  pluginReload: pluginReloadHandler,
+  pluginInfo: pluginInfoHandler
 };

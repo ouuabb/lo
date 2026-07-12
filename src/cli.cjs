@@ -757,6 +757,29 @@ cli
       .demandCommand(1, '请指定同步子命令。可用: pull, push, status, conflict');
   })
 
+  .command('plugin', '插件系统管理（Phase 6.1）', (yargs) => {
+    yargs
+      .command('list', '列出已加载插件', {}, graphCmd.pluginList)
+
+      .command('enable <id>', '启用插件', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '插件 ID' });
+      }, graphCmd.pluginEnable)
+
+      .command('disable <id>', '禁用插件', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '插件 ID' });
+      }, graphCmd.pluginDisable)
+
+      .command('reload <id>', '重载插件', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '插件 ID' });
+      }, graphCmd.pluginReload)
+
+      .command('info <id>', '查看插件详情', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '插件 ID' });
+      }, graphCmd.pluginInfo)
+
+      .demandCommand(1, '请指定插件子命令。可用: list, enable, disable, reload, info');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {
