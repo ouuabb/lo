@@ -11,7 +11,10 @@ class Database {
   }
 
   async open() {
-    await fs.ensureDir(path.join(this.repoPath, '.repo'));
+    const repoDir = path.join(this.repoPath, '.repo');
+    if (!(await fs.pathExists(repoDir))) {
+      throw new Error(`此目录不是 lo 仓库（缺少 .repo）。请先执行 lo init 初始化。`);
+    }
 
     return new Promise((resolve, reject) => {
       this.db = new sqlite3.Database(this.dbPath, (err) => {
