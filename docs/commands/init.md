@@ -1,0 +1,37 @@
+## init — 初始化资源仓库
+
+**用法:** `lo init [--path <路径>]`
+
+在指定目录创建资源仓库结构。
+
+执行 lo init 后会:
+1. 创建 resources/ 资源目录
+2. 创建 .repo/ 仓库元数据目录
+3. 初始化 SQLite 数据库（database.sqlite）
+4. 初始化暂存区（staging.json）
+5. 生成 AES-256-GCM 加密密钥（.repo/keys/repo.key）
+6. 创建 .note/config.json 用户配置文件
+
+### 选项
+
+| 选项 | 说明 |
+|------|------|
+| `--path` | 仓库根目录路径（默认: 当前工作目录） |
+
+### 示例
+
+```bash
+lo init                     # 在当前目录初始化
+lo init --path ~/notes     # 在指定目录初始化
+```
+
+### 注意事项
+
+- 如果仓库已存在，重复运行 lo init 不会覆盖已有数据
+- 生成的加密密钥权限为 0o600（仅所有者可读写）
+- 建议初始化后立即运行 lo auth add 绑定 SSH 密钥保护
+
+### 相关命令
+
+- [auth](./auth.md) — 绑定 SSH 密钥保护加密密钥
+- [config](./config.md) — 管理仓库配置

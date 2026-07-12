@@ -29,6 +29,7 @@ const importCmd = require('./commands/import.cjs');
 const sync = require('./commands/sync.cjs');
 const manual = require('./commands/manual.cjs');
 const docs = require('./commands/docs/index.cjs');
+const docsServe = require('./commands/docs-serve.cjs');
 const status = require('./commands/status.cjs');
 const add = require('./commands/add.cjs');
 const commit = require('./commands/commit.cjs');
@@ -551,11 +552,12 @@ cli
       });
   }, manual)
 
-  .command('docs [topic]', '查看项目功能详解（加密、认证等）', (yargs) => {
+  .command('docs [topic|serve]', '查看项目功能详解', (yargs) => {
     yargs
+      .command('serve', '启动 VitePress 文档站点', {}, docsServe)
       .positional('topic', {
         type: 'string',
-        description: '查看的主题（notes, encryption, auth, version, database, security, quickstart）'
+        description: '查看的主题'
       });
   }, docs)
 
