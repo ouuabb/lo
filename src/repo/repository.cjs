@@ -126,9 +126,7 @@ class Repository {
 
   async open({ skipAuth = false } = {}) {
     this.db = new Database(this.repoPath);
-    await this.db.open();
-    // 确保全部表存在（为已有仓库做增量迁移）
-    await this.db.createTables();
+    await this.db.init();
     
     this.resourceService = new ResourceService(this.db, {
       getCryptoKey: () => this._cryptoKey
