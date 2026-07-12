@@ -46,7 +46,8 @@ class PluginManager {
       repository: options.repository || null,
       logger: options.logger || console,
       extensionRegistry: this.extensions,
-      hookManager: this.hooks
+      hookManager: this.hooks,
+      eventBus: options.eventBus || null
     };
 
     // 数据库（用于持久化状态）

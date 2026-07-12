@@ -1686,6 +1686,160 @@ async function pluginInfoHandler(argv) {
   }
 }
 
+// ═══════════ Phase 6.2: Event System Handlers ═══════════
+
+/**
+ * lo event list
+ */
+async function eventListHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const options = { limit: argv.limit || 20 };
+    if (argv.type) options.type = argv.type;
+    if (argv.source) options.source = argv.source;
+
+    const history = await repo.getEventHistory(options);
+
+    console.log(chalk.bold.cyan('\n  Event History'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (history.length === 0) {
+      console.log(chalk.gray('  No events recorded yet.'));
+    } else {
+      for (const e of history) {
+        const time = new Date(e.createdAt).toLocaleString();
+        console.log(`  ${chalk.cyan(e.id.slice(0, 16))}  ${chalk.yellow(e.type.padEnd(28))}  ${chalk.gray(e.source.padEnd(12))}  ${time}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`事件列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo event history
+ */
+async function eventHistoryHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const stats = await repo.getEventStats();
+
+    console.log(chalk.bold.cyan('\n  Event Statistics'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (stats.length === 0) {
+      console.log(chalk.gray('  No events recorded.'));
+    } else {
+      for (const s of stats) {
+        console.log(`  ${chalk.yellow(s.type.padEnd(30))}  ${chalk.cyan(String(s.count).padStart(5))}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`事件统计失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo event listeners <type>
+ */
+async function eventListenersHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const type = argv.type || null;
+
+    if (!type) {
+      const types = repo.getRegisteredEventTypes();
+      console.log(chalk.bold.cyan('\n  Registered Event Types'));
+      console.log(chalk.gray('  ───────────────────────────────\n'));
+      if (types.length === 0) {
+        console.log(chalk.gray('  No listeners registered.'));
+      } else {
+        for (const t of types) {
+          const count = repo.getEventListeners(t);
+          console.log(`  ${chalk.yellow(t.padEnd(30))}  ${chalk.cyan(String(count).padStart(3))} listeners`);
+        }
+      }
+    } else {
+      const count = repo.getEventListeners(type);
+      console.log(chalk.bold.cyan(`\n  Listeners for '${type}'`));
+      console.log(`  ${chalk.cyan(count)} listener(s) registered.`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`事件监听器查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo event replay <id>
+ */
+async function eventReplayHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    let events;
+
+    if (argv.id) {
+      // Replay from specific event
+      const store = new (require('../event/eventStore.cjs'))(repo.db);
+      const event = await store.get(argv.id);
+      if (!event) {
+        console.log(chalk.red(`\n  Event '${argv.id}' not found.\n`));
+        await repo.close();
+        process.exit(1);
+      }
+
+      events = await repo.replayEvents({
+        since: event.createdAt,
+        limit: argv.limit || 50
+      });
+    } else {
+      // Replay all
+      events = await repo.replayEvents({ limit: argv.limit || 20 });
+    }
+
+    console.log(chalk.bold.cyan('\n  Event Replay'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (events.length === 0) {
+      console.log(chalk.gray('  No events to replay.'));
+    } else {
+      for (const e of events) {
+        const time = new Date(e.createdAt).toLocaleString();
+        console.log(`  ${chalk.green('▶')} ${chalk.yellow(e.type.padEnd(28))}  ${chalk.gray(time)}`);
+      }
+    }
+
+    console.log(`\n  ${chalk.cyan(events.length)} events replayed.\n`);
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`事件回放失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -1730,5 +1884,9 @@ module.exports = {
   pluginEnable: pluginEnableHandler,
   pluginDisable: pluginDisableHandler,
   pluginReload: pluginReloadHandler,
-  pluginInfo: pluginInfoHandler
+  pluginInfo: pluginInfoHandler,
+  eventList: eventListHandler,
+  eventHistory: eventHistoryHandler,
+  eventListeners: eventListenersHandler,
+  eventReplay: eventReplayHandler
 };

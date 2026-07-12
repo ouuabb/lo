@@ -28,6 +28,7 @@ class PluginContext {
     this.extensionRegistry = services.extensionRegistry || null;
     this.hookManager = services.hookManager || null;
     this.cache = services.cache || null;
+    this.eventBus = services.eventBus || null;
   }
 
   /**

@@ -780,6 +780,28 @@ cli
       .demandCommand(1, '请指定插件子命令。可用: list, enable, disable, reload, info');
   })
 
+  .command('event', '事件系统（Phase 6.2）', (yargs) => {
+    yargs
+      .command('list', '查看事件列表', (yargs) => {
+        yargs.option('type', { type: 'string', description: '按类型过滤' });
+        yargs.option('source', { type: 'string', description: '按来源过滤' });
+        yargs.option('limit', { type: 'number', description: '数量限制', default: 20 });
+      }, graphCmd.eventList)
+
+      .command('history', '事件统计', {}, graphCmd.eventHistory)
+
+      .command('listeners [type]', '查看事件监听器', (yargs) => {
+        yargs.positional('type', { type: 'string', description: '事件类型（可选，不指定则列出全部）' });
+      }, graphCmd.eventListeners)
+
+      .command('replay [id]', '事件回放', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '起始事件 ID（可选）' });
+        yargs.option('limit', { type: 'number', description: '数量限制', default: 20 });
+      }, graphCmd.eventReplay)
+
+      .demandCommand(1, '请指定事件子命令。可用: list, history, listeners, replay');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {

@@ -300,6 +300,9 @@ class Database {
 
     // V14: plugin system（Phase 6.1）
     await this._migratePluginV14();
+
+    // V15: events（Phase 6.2）
+    await this._migrateEventV15();
   }
 
   run(sql, params = []) {
@@ -942,6 +945,29 @@ class Database {
       `);
     } catch (e) {
       console.error('[migrate] Plugin V14 失败:', e.message);
+    }
+  }
+
+  /**
+   * V15: Phase 6.2 Event System
+   *   events — 事件持久化表
+   */
+  async _migrateEventV15() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS events (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          source TEXT DEFAULT 'system',
+          payload TEXT DEFAULT '{}',
+          metadata TEXT DEFAULT '{}',
+          created_at INTEGER NOT NULL
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)`);
+    } catch (e) {
+      console.error('[migrate] Event V15 失败:', e.message);
     }
   }
 

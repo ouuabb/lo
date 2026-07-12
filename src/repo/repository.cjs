@@ -42,6 +42,10 @@ const KnowledgeStrategyEngine = require('./knowledgeStrategyEngine.cjs');
 const CollectiveKnowledgeEngine = require('./collectiveKnowledgeEngine.cjs');
 const EvolutionMemory = require('./evolutionMemory.cjs');
 const PluginManager = require('../plugin/pluginManager.cjs');
+const Event = require('../event/event.cjs');
+const EventBus = require('../event/eventBus.cjs');
+const EventStore = require('../event/eventStore.cjs');
+const EventMiddleware = require('../event/eventMiddleware.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2043,7 +2047,8 @@ class Repository {
       this._pluginManager = new PluginManager({
         pluginsDir: path.join(__dirname, '..', 'plugins'),
         repository: this,
-        db: this.db
+        db: this.db,
+        eventBus: this._getEventBus()
       });
     }
     return this._pluginManager;
@@ -2115,6 +2120,93 @@ class Repository {
 
   getPluginExtensionRegistry() {
     return this.getPluginManager().getExtensionRegistry();
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.2: Event Bus System
+  // ──────────────────────────────────────
+
+  /**
+   * 获取 EventBus（懒初始化）
+   */
+  _getEventBus() {
+    if (!this._eventBus) {
+      const store = new EventStore(this.db);
+      const middleware = new EventMiddleware();
+
+      // 默认日志中间件
+      middleware.register('afterEmit', (event) => {
+        // Lightweight logging
+        if (event.type !== 'resource.updated') {
+          // Debug: console.log(`[event] ${event.type} (${event.source})`);
+        }
+        return event;
+      }, -100);
+
+      this._eventBus = new EventBus({ store, middleware });
+    }
+    return this._eventBus;
+  }
+
+  /**
+   * 发布事件
+   * @param {string} type — 事件类型
+   * @param {any} payload — 事件数据
+   * @param {{ source?: string, metadata?: object }} options
+   */
+  emitEvent(type, payload, options = {}) {
+    const bus = this._getEventBus();
+    return bus.emit({
+      type,
+      payload,
+      source: options.source || 'repository',
+      metadata: options.metadata || {}
+    });
+  }
+
+  /**
+   * 注册事件监听器
+   */
+  onEvent(type, handler) {
+    const bus = this._getEventBus();
+    bus.on(type, handler);
+  }
+
+  /**
+   * 获取事件历史
+   */
+  async getEventHistory(options = {}) {
+    const store = new EventStore(this.db);
+    return store.query(options);
+  }
+
+  /**
+   * 事件统计
+   */
+  async getEventStats() {
+    const store = new EventStore(this.db);
+    return store.typeStats();
+  }
+
+  /**
+   * Event Replay
+   */
+  async replayEvents(options = {}) {
+    const store = new EventStore(this.db);
+    return store.replay(options);
+  }
+
+  /**
+   * 获取事件监听器列表
+   */
+  getEventListeners(type) {
+    const bus = this._getEventBus();
+    return bus.listeners(type);
+  }
+
+  getRegisteredEventTypes() {
+    const bus = this._getEventBus();
+    return bus.registeredTypes();
   }
 
   async exportGraph(format = 'json', options = {}) {
