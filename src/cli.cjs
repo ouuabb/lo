@@ -646,6 +646,10 @@ cli
 
       .command('timeline', '知识演化时间线', {}, graphCmd.knowledgeTimeline)
 
+      .command('lifecycle', '知识生命周期状态', {}, graphCmd.knowledgeLifecycle)
+
+      .command('repair', '知识修复诊断（断裂关系/孤立资源/重复资源）', {}, graphCmd.knowledgeRepairDiagnosis)
+
       .command('ai', 'AI 知识助手', (yargs) => {
         yargs
           .command('explain <resource>', 'AI 解释资源位置', (yargs) => {
@@ -664,7 +668,7 @@ cli
           .demandCommand(1, '请指定 AI 子命令。可用: explain, summarize, ask');
       })
 
-      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline, ai');
+      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline, lifecycle, repair, ai');
   })
 
   .command('suggestion', 'AI 建议管理（Phase 5.8）', (yargs) => {
@@ -686,6 +690,13 @@ cli
       }, graphCmd.suggestionReject)
 
       .demandCommand(1, '请指定建议子命令。可用: list, approve, execute, reject');
+  })
+
+  .command('automation', '知识自动化（Phase 5.9）', (yargs) => {
+    yargs
+      .command('run', '运行完整自动化管线（lifecycle + repair + suggestion）', {}, graphCmd.automationRun)
+
+      .demandCommand(1, '请指定自动化子命令。可用: run');
   })
 
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {

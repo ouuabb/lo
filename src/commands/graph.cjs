@@ -925,6 +925,181 @@ async function knowledgeAIAskHandler(argv) {
   }
 }
 
+// ═══════════ Phase 5.9: Knowledge OS Automation Handlers ═══════════
+
+/**
+ * lo automation run
+ */
+async function automationRunHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    console.log(chalk.bold.cyan('\n  Knowledge Automation'));
+    console.log(chalk.gray('  Running full pipeline...\n'));
+
+    const result = await repo.runAutomation();
+
+    // Lifecycle
+    if (result.lifecycle) {
+      console.log(chalk.bold('  Lifecycle:'));
+      console.log(`    ${chalk.green('Active:')}     ${result.lifecycle.active}`);
+      console.log(`    ${chalk.yellow('Inactive:')}   ${result.lifecycle.inactive}`);
+      console.log(`    ${chalk.red('Forgotten:')}   ${result.lifecycle.forgotten}`);
+      console.log(`    ${chalk.gray('Archived:')}   ${result.lifecycle.archived}`);
+    }
+
+    // Repair
+    if (result.repair) {
+      console.log(chalk.bold('\n  Repair:'));
+      console.log(`    ${chalk.red('Broken relations:')}  ${result.repair.brokenCount}`);
+      console.log(`    ${chalk.yellow('Orphan resources:')}  ${result.repair.orphanCount}`);
+      console.log(`    ${chalk.cyan('Duplicate candidates:')}  ${result.repair.duplicateCount}`);
+    }
+
+    // Suggestions
+    if (result.suggestions.length > 0) {
+      console.log(chalk.bold(`\n  Generated ${chalk.yellow(result.suggestions.length)} suggestions:`));
+      const priorities = { high: 0, medium: 0, low: 0 };
+      const categories = {};
+      for (const s of result.suggestions) {
+        priorities[s.priority || 'medium'] = (priorities[s.priority || 'medium'] || 0) + 1;
+        categories[s.sourceCategory || 'unknown'] = (categories[s.sourceCategory || 'unknown'] || 0) + 1;
+      }
+      console.log(`    ${chalk.red('high:')} ${priorities.high}  ${chalk.yellow('medium:')} ${priorities.medium}  ${chalk.gray('low:')} ${priorities.low}`);
+      console.log(`    categories: ${Object.entries(categories).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+      console.log(chalk.gray('\n    Use "lo suggestion list" to review.'));
+    } else {
+      console.log(chalk.green('\n  No issues found. Knowledge base is healthy.'));
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`自动化运行失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo knowledge lifecycle
+ */
+async function knowledgeLifecycleHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const { summary, resources } = await repo.getKnowledgeLifecycle();
+
+    console.log(chalk.bold.cyan('\n  Knowledge Lifecycle'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.green('Active:')}     ${summary.active}`);
+    console.log(`  ${chalk.yellow('Inactive:')}   ${summary.inactive}`);
+    console.log(`  ${chalk.red('Forgotten:')}   ${summary.forgotten}`);
+    console.log(`  ${chalk.gray('Archived:')}   ${summary.archived}`);
+    console.log(`  ${chalk.gray('Total:')}      ${summary.total}`);
+
+    // 显示被遗忘的资源
+    const forgotten = resources.filter(r => r.state === 'forgotten');
+    if (forgotten.length > 0) {
+      console.log(chalk.red(`\n  ${forgotten.length} forgotten resource(s):`));
+      for (const f of forgotten) {
+        console.log(`    ${chalk.cyan(f.rid)}  ${chalk.gray(f.name)}`);
+        console.log(`    ${chalk.gray(f.reason)}`);
+      }
+    }
+
+    // 显示不活跃资源
+    const inactive = resources.filter(r => r.state === 'inactive');
+    if (inactive.length > 0) {
+      console.log(chalk.yellow(`\n  ${inactive.length} inactive resource(s):`));
+      for (const r of inactive.slice(0, 10)) {
+        console.log(`    ${chalk.cyan(r.rid)}  ${chalk.gray(r.name)}`);
+      }
+      if (inactive.length > 10) {
+        console.log(chalk.gray(`    ... and ${inactive.length - 10} more`));
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`生命周期查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo knowledge repair
+ */
+async function knowledgeRepairHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const diagnosis = await repo.runKnowledgeRepair();
+
+    console.log(chalk.bold.cyan('\n  Knowledge Repair Diagnosis'));
+    console.log(chalk.gray('  ───────────────────────────────'));
+
+    // Broken relations
+    if (diagnosis.brokenRelations.length > 0) {
+      console.log(chalk.red(`\n  Broken relations: ${diagnosis.brokenRelations.length}`));
+      for (const br of diagnosis.brokenRelations.slice(0, 10)) {
+        console.log(`    #${br.id}  ${chalk.cyan(br.from_rid)} ${chalk.gray('→')} ${chalk.cyan(br.to_rid)}`);
+        console.log(`    ${chalk.gray(br.suggestion.reason)}`);
+      }
+      if (diagnosis.brokenRelations.length > 10) {
+        console.log(chalk.gray(`    ... and ${diagnosis.brokenRelations.length - 10} more`));
+      }
+    } else {
+      console.log(chalk.green('\n  No broken relations.'));
+    }
+
+    // Orphan resources
+    if (diagnosis.orphanResources.length > 0) {
+      console.log(chalk.yellow(`\n  Orphan resources: ${diagnosis.orphanResources.length}`));
+      for (const or of diagnosis.orphanResources.slice(0, 10)) {
+        console.log(`    ${chalk.cyan(or.rid)}  ${chalk.gray(or.name)}  (${or.type})`);
+      }
+      if (diagnosis.orphanResources.length > 10) {
+        console.log(chalk.gray(`    ... and ${diagnosis.orphanResources.length - 10} more`));
+      }
+    } else {
+      console.log(chalk.green('\n  No orphan resources.'));
+    }
+
+    // Duplicate candidates
+    if (diagnosis.duplicateCandidates.length > 0) {
+      console.log(chalk.cyan(`\n  Duplicate candidates: ${diagnosis.duplicateCandidates.length}`));
+      for (const dc of diagnosis.duplicateCandidates.slice(0, 10)) {
+        console.log(`    ${chalk.cyan(dc.resourceA.name)} ${chalk.gray('≈')} ${chalk.cyan(dc.resourceB.name)}  ${chalk.gray((dc.similarity * 100).toFixed(0) + '%')}`);
+      }
+      if (diagnosis.duplicateCandidates.length > 10) {
+        console.log(chalk.gray(`    ... and ${diagnosis.duplicateCandidates.length - 10} more`));
+      }
+    } else {
+      console.log(chalk.green('\n  No duplicate candidates.'));
+    }
+
+    if (diagnosis.summary.totalIssues === 0) {
+      console.log(chalk.green('\n  Knowledge base is clean.'));
+    } else {
+      console.log(chalk.yellow(`\n  Total issues: ${diagnosis.summary.totalIssues}`));
+      console.log(chalk.gray('  Run "lo automation run" to generate fix suggestions.'));
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`修复诊断失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -948,5 +1123,8 @@ module.exports = {
   suggestionReject: suggestionRejectHandler,
   knowledgeAIExplain: knowledgeAIExplainHandler,
   knowledgeAISummarize: knowledgeAISummarizeHandler,
-  knowledgeAIAsk: knowledgeAIAskHandler
+  knowledgeAIAsk: knowledgeAIAskHandler,
+  automationRun: automationRunHandler,
+  knowledgeLifecycle: knowledgeLifecycleHandler,
+  knowledgeRepairDiagnosis: knowledgeRepairHandler
 };

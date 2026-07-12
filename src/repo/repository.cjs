@@ -28,6 +28,10 @@ const SemanticRelationEngine = require('./semanticRelationEngine.cjs');
 const SuggestionEngine = require('./suggestionEngine.cjs');
 const AIMemory = require('./aiMemory.cjs');
 const KnowledgeAssistant = require('./knowledgeAssistant.cjs');
+const KnowledgeRepair = require('./knowledgeRepair.cjs');
+const KnowledgeScheduler = require('./knowledgeScheduler.cjs');
+const ResourceLifecycle = require('../domain/resourceLifecycle.cjs');
+const ResourceWatcher = require('./resourceWatcher.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -1579,6 +1583,175 @@ class Repository {
    */
   async getAIMemory() {
     return new AIMemory(this.db);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.9: Knowledge OS Automation
+  // ──────────────────────────────────────
+
+  /**
+   * 获取知识修复引擎
+   */
+  async _getKnowledgeRepair() {
+    const engine = await this._getGraphEngine();
+    return new KnowledgeRepair(this.db, engine);
+  }
+
+  /**
+   * 获取知识调度器
+   */
+  _getKnowledgeScheduler() {
+    const services = {};
+    // Lazy: 异步获取服务引用（尽量避免在构造时加载引擎）
+    return {
+      db: this.db,
+      services,
+      _repo: this,
+      async runAll() {
+        const repo = this._repo;
+        services.graphEngine = await repo._getGraphEngine();
+        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch {}
+        try { services.recommendationEngine = await repo._getRecommendationEngine(); } catch {}
+        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch {}
+        const se = new SuggestionEngine(repo.db);
+        services.suggestionEngine = se;
+        const scheduler = new KnowledgeScheduler(repo.db, services);
+        return scheduler.runAll();
+      },
+      async scanForgotten() {
+        const repo = this._repo;
+        services.graphEngine = await repo._getGraphEngine();
+        const scheduler = new KnowledgeScheduler(repo.db, services);
+        return scheduler.scanForgottenResources();
+      },
+      async analyzeHealth() {
+        const repo = this._repo;
+        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch {}
+        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch {}
+        const scheduler = new KnowledgeScheduler(repo.db, services);
+        return scheduler.analyzeKnowledgeHealth();
+      },
+      async generateReport() {
+        const repo = this._repo;
+        services.graphEngine = await repo._getGraphEngine();
+        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch {}
+        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch {}
+        const scheduler = new KnowledgeScheduler(repo.db, services);
+        return scheduler.generateKnowledgeReport();
+      }
+    };
+  }
+
+  /**
+   * 获取资源生命周期状态
+   */
+  async getKnowledgeLifecycle() {
+    const resources = await this.db.all(`
+      SELECT rid, name, created, updated FROM resources WHERE deleted = 0
+    `);
+
+    // 获取最后关系时间
+    const lastRels = await this.db.all(`
+      SELECT r.from_rid, MAX(r.created) as last_rel
+      FROM relations r WHERE r.deleted = 0
+      GROUP BY r.from_rid
+    `);
+    const relMap = new Map();
+    for (const r of lastRels) {
+      relMap.set(r.from_rid, r.last_rel || 0);
+    }
+
+    // 获取 PageRank 评分
+    let pageRanks = new Map();
+    try {
+      const engine = await this._getGraphEngine();
+      const pr = engine.pageRank({ iterations: 20, damping: 0.85 });
+      for (const r of pr) pageRanks.set(r.rid, r.score);
+    } catch {}
+
+    const inputs = resources.map(r => ({
+      rid: r.rid,
+      name: r.name,
+      score: pageRanks.get(r.rid) || 0,
+      lastRelation: relMap.get(r.rid) || 0,
+      created: r.created,
+      updated: r.updated
+    }));
+
+    const lifecycles = ResourceLifecycle.batch(inputs);
+    const summary = ResourceLifecycle.summary(lifecycles);
+
+    return {
+      summary,
+      resources: lifecycles.map(lc => lc.toJSON())
+    };
+  }
+
+  /**
+   * 运行知识修复诊断
+   */
+  async runKnowledgeRepair() {
+    const repair = await this._getKnowledgeRepair();
+    return repair.diagnose();
+  }
+
+  /**
+   * 运行完整自动化管线
+   */
+  async runAutomation() {
+    const scheduler = this._getKnowledgeScheduler();
+    return scheduler.runAll();
+  }
+
+  /**
+   * 扫描遗忘资源
+   */
+  async scanForgottenResources() {
+    const scheduler = this._getKnowledgeScheduler();
+    return scheduler.scanForgotten();
+  }
+
+  /**
+   * 分析知识健康度
+   */
+  async analyzeKnowledgeHealth() {
+    const scheduler = this._getKnowledgeScheduler();
+    return scheduler.analyzeHealth();
+  }
+
+  /**
+   * 资源文件监控
+   */
+  async watchResources() {
+    const watcher = new ResourceWatcher(this.db, this.repoPath);
+    return watcher.check();
+  }
+
+  /**
+   * 获取知识事件记录
+   * @param {{ type?: string, limit?: number }} options
+   */
+  async getKnowledgeEvents(options = {}) {
+    const { type, limit = 50 } = options;
+    let sql = 'SELECT * FROM knowledge_events';
+    const params = [];
+
+    if (type) {
+      sql += ' WHERE type = ?';
+      params.push(type);
+    }
+
+    sql += ' ORDER BY created DESC LIMIT ?';
+    params.push(limit);
+
+    const rows = await this.db.all(sql, params);
+    return rows.map(r => ({
+      id: r.id,
+      type: r.type,
+      rid: r.rid,
+      payload: (() => { try { return JSON.parse(r.payload || '{}'); } catch { return {}; } })(),
+      created: r.created
+    }));
   }
 
   async exportGraph(format = 'json', options = {}) {

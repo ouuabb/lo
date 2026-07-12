@@ -288,6 +288,9 @@ class Database {
 
     // V10: ai_suggestions + ai_memory 表（Phase 5.8）
     await this._migrateAIV10();
+
+    // V11: knowledge_events + ai_suggestions 扩展（Phase 5.9）
+    await this._migrateAutomationV11();
   }
 
   run(sql, params = []) {
@@ -775,6 +778,41 @@ class Database {
       `);
     } catch (e) {
       console.error('[migrate] AI V10 失败:', e.message);
+    }
+  }
+
+  /**
+   * V11: Phase 5.9 Knowledge OS Automation
+   *   knowledge_events — 自动化事件记录
+   *   ai_suggestions 扩展 — priority / source / expires
+   */
+  async _migrateAutomationV11() {
+    try {
+      // knowledge_events 表
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS knowledge_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          rid TEXT,
+          payload TEXT DEFAULT '{}',
+          created INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_events_type ON knowledge_events(type)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_events_rid ON knowledge_events(rid)`);
+
+      // ai_suggestions 扩展列
+      for (const col of [
+        { name: 'priority', def: "TEXT DEFAULT 'medium'" },
+        { name: 'source', def: "TEXT DEFAULT 'ai'" },
+        { name: 'expires', def: 'INTEGER' }
+      ]) {
+        try {
+          await this.run(`ALTER TABLE ai_suggestions ADD COLUMN ${col.name} ${col.def}`);
+        } catch (e) { /* 列已存在 */ }
+      }
+    } catch (e) {
+      console.error('[migrate] Automation V11 失败:', e.message);
     }
   }
 
