@@ -149,13 +149,15 @@ V20 建表时遗漏了 `relations` 列。V25 通过 `ALTER TABLE ADD COLUMN rela
 
 ## 修复方案
 
-### 已执行：删除全部迁移代码
+### 已执行：建立迁移追踪系统
 
-所有 25 个迁移方法已删除。`createTables()` 改为一次性建全部 40 张表的最终结构——所有列、约束、索引均在 `CREATE TABLE IF NOT EXISTS` 语句中直接声明。
+保留一张 `001_initial_schema.cjs` 迁移文件（含全部 40 张表的最终结构），由 `migrationRunner.cjs` 通过 `schema_migrations` 追踪表确保每个迁移仅执行一次。
 
-新库启动：一次建完，零次 ALTER。
+新库首次启动：执行 `001_initial_schema` 一次建全部 40 张表。
 
-老库兼容：`CREATE TABLE IF NOT EXISTS` 跳过已存在的表。如果老库的表结构缺列（不可能 —— 因为老库已跑过 25 次迁移补齐了所有列），需要用一次性的数据修复脚本手动处理。
+老库兼容：`CREATE TABLE IF NOT EXISTS` 保证与已有表不冲突。已存在的表结构（老库跑过 V1–V25）不变，仅补建未存在的 Phase 6 预留表。
+
+后续变更通过新增 `002_xxx.cjs` / `003_xxx.cjs` 迁移文件进行，详见[数据库迁移系统](/architecture/migration)。
 
 ### 表结构修复
 

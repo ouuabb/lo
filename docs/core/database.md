@@ -141,9 +141,14 @@ CREATE TABLE relations (
 - DB 始终存储明文 SHA-256
 - 相同内容多次加密 → 相同散列 → 正确检测不变更
 
+### 数据库迁移
+
+表结构的创建和变更由迁移系统管理，详见[数据库迁移系统](/architecture/migration)。
+
 ### 相关文档
 
 - [RID 一等公民](rid.md) — resources 表主键设计
 - [操作追踪体系](../advanced/operations.md) — sync_ops 表详解
 - [搜索系统](search.md) — 搜索与查询引擎
 - [版本控制](version.md) — commits 表与暂存区
+- [数据库表结构审计](/architecture/schema-audit) — V1–V25 迁移冲突调查

@@ -177,6 +177,7 @@ export default withMermaid({
           items: [
             { text: '数据一致性审计', link: '/architecture/data-consistency' },
             { text: '生产就绪差距', link: '/architecture/production-gaps' },
+            { text: '数据库迁移系统', link: '/architecture/migration' },
             { text: '数据库表结构审计', link: '/architecture/schema-audit' }
           ]
         }
