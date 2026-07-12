@@ -29,7 +29,8 @@ module.exports = function help(argv) {
 
   console.log('\n' + chalk.bold('资源管理:'));
   console.log('  create resource   创建容器资源（project/album/dataset 等）');
-  console.log('  container      容器管理（promote/status/scan/list 等）');
+  console.log('  container      容器管理（promote/status/scan/sync/list/members/ignore 等）');
+  console.log('  resource       资源导航（related/backlinks/impact）');
   console.log('  link          建立资源链接');
   console.log('  unlink        解除资源链接');
   console.log('  move          移动资源');
@@ -37,6 +38,24 @@ module.exports = function help(argv) {
   console.log('  category      管理分类');
   console.log('  sync          同步资源（含 [[wikilink]] 自动解析，无提交历史）');
   console.log('  stack         管理资源栈（同名冲突冗余副本，list/pop/drop）');
+
+  console.log('\n' + chalk.bold('关系图与知识智能:'));
+  console.log('  graph          资源关系图（neighbors/backlinks/path/cycles/export/analyze/query）');
+  console.log('  relation       关系管理（add/remove/list/show）');
+  console.log('  knowledge      知识智能（analyze/gaps/recommend/timeline/lifecycle/repair/ai/evolution）');
+  console.log('  suggestion     AI 建议管理（list/approve/execute/reject）');
+  console.log('  automation     知识自动化（run）');
+  console.log('  federation     联邦仓库管理（list/add/remove）');
+
+  console.log('\n' + chalk.bold('扩展系统（Phase 6.x）:'));
+  console.log('  plugin         插件系统（list/enable/disable/reload/info）');
+  console.log('  event          事件总线（list/history/listeners/replay）');
+  console.log('  workflow       工作流引擎（list/run/status/history）');
+  console.log('  permission     权限管理（role/check/grant/audit）');
+  console.log('  agent          知识智能体（list/info/run/memory/messages/send）');
+  console.log('  team           Agent 团队协作（list/run）');
+  console.log('  ai             AI 原生知识 OS（status/ask/analyze/insights/memory）');
+  console.log('  evolution      知识系统自演化（status/analyze/run/history）');
   
   console.log('\n' + chalk.bold('搜索与查询:'));
   console.log('  find          搜索资源');

@@ -13,25 +13,34 @@ module.exports = function() {
   远程只是一个通过 SSH 访问的裸目录。
 
   ┌─────────────────────────────────────────────────────────────┐
-  │                       lo 核心架构                            │
+  │                       lo 系统架构（Phase 6.x）                 │
   │                                                              │
-  │  ┌─────────┐    ┌──────────────────────┐    ┌────────────┐  │
-  │  │ CLI     │    │       Repository      │    │ HTTP API   │  │
-  │  │ (cli.cjs)│───│   (repository.cjs)    │───│(serve.cjs) │  │
-  │  └─────────┘    │                       │    └────────────┘  │
-  │                  │  ┌─────────────────┐ │                    │
-  │                  │  │ ResourceService │ │                    │
-  │                  │  │ RelationService │ │                    │
-  │                  │  │ QueryEngine     │ │                    │
-  │                  │  │ SyncOpsEngine   │ │                    │
-  │                  │  │ StagingArea     │ │                    │
-  │                  │  └────────┬────────┘ │                    │
-  │                  │           │          │                    │
-  │                  │    ┌──────┴──────┐   │                    │
-  │                  │    │  Database   │   │                    │
-  │                  │    │  (SQLite)   │   │                    │
-  │                  │    └─────────────┘   │                    │
-  │                  └──────────────────────┘                    │
+  │  ┌─────────┐    ┌──────────────────────────────────────┐    │
+  │  │ CLI     │    │           Repository                  │    │
+  │  │(cli.cjs)│───│       (repository.cjs)                 │    │
+  │  └─────────┘    │                                       │    │
+  │                  │  ┌─────────────────────────────────┐ │    │
+  │                  │  │  核心服务层                       │ │    │
+  │                  │  │  ResourceService / RelationService│ │    │
+  │                  │  │  QueryEngine / SyncOpsEngine     │ │    │
+  │                  │  │  StagingArea / ContainerService  │ │    │
+  │                  │  ├─────────────────────────────────┤ │    │
+  │                  │  │  Phase 6 扩展系统                 │ │    │
+  │                  │  │  PluginManager / EventBus        │ │    │
+  │                  │  │  WorkflowEngine / PermissionEngine│ │    │
+  │                  │  │  AgentEngine / CollaborationEngine│ │    │
+  │                  │  │  AIOSKernel / EvolutionEngine    │ │    │
+  │                  │  ├─────────────────────────────────┤ │    │
+  │   ┌────────────┐ │  │  Knowledge Graph                 │ │    │
+  │   │ HTTP API   │ │  │  GraphEngine / FederatedGraph   │ │    │
+  │   │(serve.cjs) │─│  │  SuggestionEngine / AutoPipeline │ │    │
+  │   └────────────┘ │  └───────────────┬─────────────────┘ │    │
+  │                  │                  │                    │    │
+  │                  │           ┌──────┴──────┐             │    │
+  │                  │           │  Database   │             │    │
+  │                  │           │  (SQLite)   │             │    │
+  │                  │           └─────────────┘             │    │
+  │                  └──────────────────────────────────────┘    │
   │                            │                                 │
   │              ┌─────────────┼─────────────┐                  │
   │              ▼             ▼             ▼                  │
@@ -180,10 +189,23 @@ module.exports = function() {
   │  this.staging    → StagingArea   提交暂存区                   │
   │  this.watcher    → FileWatcher   文件系统监听                 │
   │                                                              │
+  │  // Phase 6 扩展系统 (6.1~6.8)                                 │
+  │  this.pluginManager   → PluginManager     插件管理 (6.1)     │
+  │  this.eventBus        → EventBus          事件总线 (6.2)     │
+  │  this.workflowEngine  → WorkflowEngine    工作流引擎 (6.3)   │
+  │  this.permissionEngine→ PermissionEngine  权限系统 (6.4)      │
+  │  this.agentEngine     → AgentEngine       智能体引擎 (6.5)   │
+  │  this.collaborationEngine → CollabEngine  协作引擎 (6.6)     │
+  │  this.aiOS            → AIOSKernel       AI OS 内核 (6.7)   │
+  │  this.evolutionEngine → EvolutionEngine   演化引擎 (6.8)     │
+  │                                                              │
+  │  // 知识图谱子系统                                            │
+  │  this.graphEngine     → GraphEngine      关系图查询引擎       │
+  │                                                              │
   │  生命周期：                                                   │
   │    open()         打开已有仓库，验证密钥                       │
-  │    init()         创建新仓库，初始化数据库                     │
-  │    close()        清理密钥，关闭数据库                        │
+  │    init()         创建新仓库，初始化数据库 + 扩展系统          │
+  │    close()        清理密钥，关闭数据库 + 卸载扩展系统          │
   │    startWatcher() 启动文件监听                                │
   │    sync()         扫描文件系统 → 更新 DB → 生成操作日志      │
   └─────────────────────────────────────────────────────────────┘
@@ -222,77 +244,75 @@ module.exports = function() {
             └── 检测 LOEC magic → 解密 → 返回明文`);
 
     // ============================================================
-    // 四、现有扩展点
+    // 四、Phase 6 扩展系统总览
     // ============================================================
-    console.log(chalk.bold.yellow('\n  四、现有扩展点'));
+    console.log(chalk.bold.yellow('\n  四、Phase 6 扩展系统总览（已实现）'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
     console.log(`
 
-  当前 lo 有两个明确的扩展出口，但都不算"插件系统"：
+  lo 的 Phase 6 系列已将以下扩展系统从设计阶段落地为正式实现：
 
   ┌─────────────────────────────────────────────────────────────┐
-  │  出口 A：编程 API（src/index.cjs）                            │
+  │  Phase 6.1 — 插件系统 (PluginManager)                        │
+  │    - 插件生命周期管理 (load/init/activate/deactivate/unload) │
+  │    - 扩展点注册 (hook/route/command/transformer/validator)   │
+  │    - 上下文隔离，插件 crash 不影响核心                       │
+  │    命令: lo plugin list/enable/disable/reload/info           │
   ├─────────────────────────────────────────────────────────────┤
-  │                                                              │
-  │  可通过 npm 或本地路径引用 lo 作为库：                        │
-  │                                                              │
-  │    const { Repository } = require('lo');                     │
-  │    // 或                                                        │
-  │    const { Repository } = require('/path/to/log/src/index.cjs');
-  │                                                              │
-  │  已导出的公共 API：                                           │
-  │                                                              │
-  │    Repository         仓库主类（核心）                        │
-  │    Database           SQLite 连接                            │
-  │    ResourceService    资源 CRUD                              │
-  │    RelationService    双向链接                               │
-  │    QueryEngine        搜索与列表                             │
-  │    FileWatcher        文件监听器                             │
-  │    Note               Note 实体类（旧）                       │
-  │    Scanner / Indexer / SearchEngine  全文搜索（旧）          │
-  │    config             工具函数：RidUtils, HashUtils 等        │
-  │                                                              │
-  │  限制：                                                       │
-  │    - 同步 API，无事件推送                                     │
-  │    - 无版本化契约（API 可能在任何版本改变）                   │
-  │    - 不包含 CLI 或 HTTP 层的任何内容                          │
-  │                                                              │
+  │  Phase 6.2 — 事件总线 (EventBus)                             │
+  │    - 发布-订阅模式，支持中间件链                             │
+  │    - 事件持久化到 SQLite，支持 replay                        │
+  │    - 资源/关系/同步/系统事件全覆盖                           │
+  │    命令: lo event list/history/listeners/replay              │
+  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 6.3 — 工作流引擎 (WorkflowEngine)                     │
+  │    - 步骤模型 (action/condition/loop/parallel/wait/script)   │
+  │    - 条件引擎 + 调度器 (manual/scheduled/event-driven)       │
+  │    命令: lo workflow list/run/status/history                 │
+  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 6.4 — 权限系统 (PermissionEngine)                     │
+  │    - RBAC+ABAC 混合模型                                      │
+  │    - 资源级 ACL + 审计日志                                   │
+  │    命令: lo permission role/check/grant/audit                │
+  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 6.5 — 知识智能体 (AgentEngine)                        │
+  │    - 多类型 Agent (researcher/curator/analyst/monitor/assistant)│
+  │    - 状态机 + 三层记忆 + 规划/执行/反思循环                  │
+  │    命令: lo agent list/info/run/memory/messages/send         │
+  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 6.6 — 多智能体协作 (CollaborationEngine)              │
+  │    - 团队模型 (Leader/Member)                                │
+  │    - 消息总线 + 任务系统 + 共享记忆                          │
+  │    命令: lo team list/run                                    │
+  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 6.7 — AI 原生知识 OS (AIOSKernel)                     │
+  │    - 模型网关 + 推理引擎 (chat/analysis/research/creation)    │
+  │    - 语义记忆 + 概念记忆 + 学习引擎                          │
+  │    命令: lo ai status/ask/analyze/insights/memory            │
+  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 6.8 — 知识系统自演化 (EvolutionEngine)                │
+  │    - OODA 循环 (Observe/Analyze/Detect/Plan/Execute/Validate) │
+  │    - 健康度分析 + 进化检测 + 策略生成 + 执行验证             │
+  │    - evolution_states/actions/history 三表                   │
+  │    命令: lo evolution status/analyze/run/history             │
   └─────────────────────────────────────────────────────────────┘
+
+  知识图谱子系统（Phase 5.x）：
 
   ┌─────────────────────────────────────────────────────────────┐
-  │  出口 B：HTTP API（lo serve）                                 │
-  ├─────────────────────────────────────────────────────────────┤
+  │  Phase 5.7  — 知识分析、缺口检测、智能推荐                   │
+  │  Phase 5.8  — AI 辅助知识图谱 (SuggestionEngine)             │
+  │  Phase 5.9  — 知识自动化管线 (AutoPipeline)                  │
+  │  Phase 5.10 — 联邦知识图谱 (FederatedGraph/GlobalRID)        │
+  │  Phase 5.11 — 知识演化与模式检测 (Hub/Chain/Bridge/Dead-end) │
   │                                                              │
-  │  lo serve 在 127.0.0.1:8765 启动 HTTP 服务：                  │
-  │                                                              │
-  │    - 原生 Node.js http 模块，无 Express                        │
-  │    - 路由通过 Map 注册（GET_ROUTES / POST_ROUTES / ...）       │
-  │    - 写操作通过 Promise 链排队（withWriteLock）                │
-  │    - SSH 挑战-应答认证，session token 60 分钟有效             │
-  │    - 无中间件链、无请求管道、无 cors 插件                      │
-  │                                                              │
-  │  完整端点列表（见 lo docs serve）                              │
-  │                                                              │
-  │  限制：                                                       │
-  │    - 无 WebSocket / Server-Sent Events（只能轮询）             │
-  │    - 路由是硬编码的，无法从外部注册                            │
-  │    - 仅监听 127.0.0.1，不对外服务                             │
-  │    - 无速率限制                                               │
-  │                                                              │
-  └─────────────────────────────────────────────────────────────┘
-
-  不存在的东西：
-    - 无事件发射器（EventEmitter / pub-sub）
-    - 无插件加载器（无 plugin / extension / adapter 机制）
-    - 无中间件管道
-    - 无 hook / lifecycle 回调
-    - 无 WebSocket 推送
-    - 无自定义 metadata 字段支持（校验严格拒绝未知字段）`);
+  │  命令: lo knowledge/suggestion/automation/federation/graph   │
+  └─────────────────────────────────────────────────────────────┘`);
 
     // ============================================================
-    // 五、扩展模块设计
+    // 五、已实现的模块协议参考
     // ============================================================
-    console.log(chalk.bold.yellow('\n  五、构建可插拔模块系统的设计方案'));
+    console.log(chalk.bold.yellow('\n  五、模块协议参考（已在 Phase 6.1 中实现）'));
     console.log(chalk.gray('  ' + '─'.repeat(55)));
 
     console.log(chalk.cyan('\n  5.1 设计目标'));
@@ -841,11 +861,19 @@ module.exports = function() {
      而非假设 API 永远不变。`);
 
     console.log(chalk.gray('\n  相关文档：'));
-    console.log(chalk.gray('    lo docs notes         — 笔记详解与元数据'));
-    console.log(chalk.gray('    lo docs database      — 数据库结构与索引'));
-    console.log(chalk.gray('    lo docs sync          — 远程同步系统'));
-    console.log(chalk.gray('    lo docs serve         — HTTP API 服务'));
-    console.log(chalk.gray('    lo docs deploy        — 仓库部署与推送'));
-    console.log(chalk.gray('    lo docs concepts      — 核心设计观念'));
+    console.log(chalk.gray('    lo docs plugin         — 插件系统详解'));
+    console.log(chalk.gray('    lo docs event          — 事件总线详解'));
+    console.log(chalk.gray('    lo docs workflow       — 工作流引擎详解'));
+    console.log(chalk.gray('    lo docs permission     — 权限系统详解'));
+    console.log(chalk.gray('    lo docs agent          — 知识智能体详解'));
+    console.log(chalk.gray('    lo docs collaboration  — 多智能体协作'));
+    console.log(chalk.gray('    lo docs ai-os          — AI 原生知识 OS'));
+    console.log(chalk.gray('    lo docs evolution      — 知识系统自演化'));
+    console.log(chalk.gray('    lo docs knowledge      — 知识智能分析'));
+    console.log(chalk.gray('    lo docs federation     — 联邦知识图谱'));
+    console.log(chalk.gray('    lo docs notes          — 笔记详解'));
+    console.log(chalk.gray('    lo docs database       — 数据库结构'));
+    console.log(chalk.gray('    lo docs sync           — 远程同步'));
+    console.log(chalk.gray('    lo docs serve          — HTTP API'));
     console.log('');
 };

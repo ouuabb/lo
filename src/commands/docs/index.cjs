@@ -26,6 +26,17 @@ const packageJson = require('../../../package.json');
  *   stack        资源栈机制（同名冲突自动冗余）
  *   rid          RID 一等公民机制
  *   operations   操作追踪体系（所有可监听的操作类型与触发来源）
+ *   resource-container  Resource 容器模型
+ *   plugin        插件系统（生命周期/扩展点/上下文隔离）
+ *   event         事件总线（发布-订阅/中间件/持久化）
+ *   workflow      工作流引擎（步骤模型/条件引擎/调度器）
+ *   permission    权限系统（RBAC+ABAC/角色/ACL/审计）
+ *   agent         知识智能体（类型/状态机/记忆/规划执行）
+ *   collaboration 多智能体协作（消息/团队/任务/共享记忆）
+ *   ai-os         AI 原生知识 OS（推理引擎/语义记忆/学习）
+ *   evolution     知识系统自演化（OODA 循环/健康分析/进化）
+ *   knowledge     知识智能分析（图谱/缺口/推荐/模式/演化）
+ *   federation    联邦知识图谱（GlobalRID/跨仓库同步）
  *   quickstart   快速上手指南
  */
 
@@ -48,7 +59,17 @@ const SECTIONS = {
   stack: require('./stack.cjs'),
   rid: require('./rid.cjs'),
   operations: require('./operations.cjs'),
-  'resource-container': require('./resource-container.cjs')
+  'resource-container': require('./resource-container.cjs'),
+  plugin: require('./plugin.cjs'),
+  event: require('./event.cjs'),
+  workflow: require('./workflow.cjs'),
+  permission: require('./permission.cjs'),
+  agent: require('./agent.cjs'),
+  collaboration: require('./collaboration.cjs'),
+  'ai-os': require('./ai-os.cjs'),
+  evolution: require('./evolution.cjs'),
+  knowledge: require('./knowledge.cjs'),
+  federation: require('./federation.cjs')
 };
 
 const TOPIC_ALIASES = {
@@ -116,7 +137,48 @@ const TOPIC_ALIASES = {
   member: 'resource-container',
   promote: 'resource-container',
   resource: 'resource-container',
-  capability: 'resource-container'
+  capability: 'resource-container',
+  plugin: 'plugin',
+  plugins: 'plugin',
+  extension: 'plugin',
+  event: 'event',
+  events: 'event',
+  eventbus: 'event',
+  pubsub: 'event',
+  workflow: 'workflow',
+  wf: 'workflow',
+  automation: 'workflow',
+  permission: 'permission',
+  perm: 'permission',
+  rbac: 'permission',
+  role: 'permission',
+  acl: 'permission',
+  audit: 'permission',
+  agent: 'agent',
+  agents: 'agent',
+  bot: 'agent',
+  collaboration: 'collaboration',
+  collab: 'collaboration',
+  team: 'collaboration',
+  multiagent: 'collaboration',
+  'ai-os': 'ai-os',
+  aios: 'ai-os',
+  ai: 'ai-os',
+  reasoning: 'ai-os',
+  semantic: 'ai-os',
+  evolution: 'evolution',
+  evolve: 'evolution',
+  ooda: 'evolution',
+  selfimprove: 'evolution',
+  knowledge: 'knowledge',
+  kg: 'knowledge',
+  graph: 'knowledge',
+  gaps: 'knowledge',
+  patterns: 'knowledge',
+  federation: 'federation',
+  federated: 'federation',
+  globalrid: 'federation',
+  crossrepo: 'federation'
 };
 
 function printIndex() {
@@ -144,6 +206,16 @@ function printIndex() {
     { id: 'rid',         name: 'RID 一等公民',       desc: 'RID 唯一标识、三级查找机制、name 与 RID 的关系' },
     { id: 'operations',  name: '操作追踪体系',       desc: 'OP_TYPES 详解、status/diff/sync 对比、FileWatcher、数据流' },
     { id: 'resource-container', name: 'Resource 容器模型', desc: 'Resource/Container/Member 模型、Content Source、Promote 机制' },
+    { id: 'plugin',      name: '插件系统 (Phase 6.1)',     desc: '插件生命周期管理、扩展点注册、上下文隔离、模块协议' },
+    { id: 'event',       name: '事件总线 (Phase 6.2)',     desc: '发布-订阅模式、中间件链、事件持久化、监听器管理' },
+    { id: 'workflow',    name: '工作流引擎 (Phase 6.3)',    desc: '步骤模型、条件引擎、调度器、执行历史' },
+    { id: 'permission',  name: '权限系统 (Phase 6.4)',     desc: 'RBAC+ABAC 混合模型、资源级 ACL、审计日志' },
+    { id: 'agent',       name: '知识智能体 (Phase 6.5)',    desc: 'Agent 类型与状态机、记忆系统、规划/执行/反思循环' },
+    { id: 'collaboration', name: '多智能体协作 (Phase 6.6)', desc: '消息模型、团队管理、任务系统、共享记忆' },
+    { id: 'ai-os',       name: 'AI 原生知识 OS (Phase 6.7)', desc: '推理引擎、语义/概念记忆、学习引擎、AI 请求响应模型' },
+    { id: 'evolution',   name: '知识系统自演化 (Phase 6.8)',  desc: 'OODA 循环、健康分析、进化检测、策略生成、执行验证' },
+    { id: 'knowledge',   name: '知识智能分析 (Phase 5.7~5.11)', desc: '知识图谱分析、缺口检测、智能推荐、模式检测、演化分析' },
+    { id: 'federation',  name: '联邦知识图谱 (Phase 5.10)', desc: 'GlobalRID、跨仓库同步、联邦图查询、冲突管理' },
     { id: 'quickstart',  name: '快速上手指南',    desc: '从 init 到 backup 的完整命令序列' }
   ];
 
