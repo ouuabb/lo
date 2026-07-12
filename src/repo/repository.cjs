@@ -23,6 +23,11 @@ const VisualExporter = require('./visualExporter.cjs');
 const KnowledgeAnalyzer = require('./knowledgeAnalyzer.cjs');
 const KnowledgeTimeline = require('./knowledgeTimeline.cjs');
 const RecommendationEngine = require('./recommendationEngine.cjs');
+const AIContextBuilder = require('./aiContextBuilder.cjs');
+const SemanticRelationEngine = require('./semanticRelationEngine.cjs');
+const SuggestionEngine = require('./suggestionEngine.cjs');
+const AIMemory = require('./aiMemory.cjs');
+const KnowledgeAssistant = require('./knowledgeAssistant.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -1426,6 +1431,154 @@ class Repository {
       timeline.activity()
     ]);
     return { monthly, growth, activity };
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.8: AI Assisted Knowledge Graph
+  // ──────────────────────────────────────
+
+  /**
+   * 获取 AI 上下文构建器
+   */
+  async _getAIContextBuilder() {
+    const engine = await this._getGraphEngine();
+    const nav = await this._getNavigationEngine();
+    const analyzer = await this._getKnowledgeAnalyzer();
+    const resolveName = (rid) => {
+      try { return this.rs.get(rid); } catch { return { name: rid }; }
+    };
+    return new AIContextBuilder(engine, nav, analyzer, resolveName);
+  }
+
+  /**
+   * 构建 AI 上下文（用于外部 AI API 调用）
+   */
+  async buildAIContext(rid) {
+    const builder = await this._getAIContextBuilder();
+    if (rid) {
+      return builder.buildResourceContext(rid);
+    }
+    return builder.buildGlobalContext();
+  }
+
+  /**
+   * 构建对话上下文
+   */
+  async buildChatContext(query) {
+    const builder = await this._getAIContextBuilder();
+    return builder.buildChatContext(query);
+  }
+
+  /**
+   * 生成 AI 建议（基于规则引擎）
+   */
+  async generateSuggestions(options) {
+    const engine = await this._getGraphEngine();
+    const nav = await this._getNavigationEngine();
+    const semantic = new SemanticRelationEngine(engine, nav);
+    const suggestions = semantic.suggest(options);
+
+    // 保存到数据库
+    const se = new SuggestionEngine(this.db);
+    await se.createBatch(suggestions.map(s => ({
+      type: 'relation',
+      source: s.source,
+      target: s.target,
+      confidence: s.confidence,
+      reason: s.reason,
+      payload: { suggestedType: s.suggestedType }
+    })));
+
+    return suggestions;
+  }
+
+  /**
+   * 获取建议列表
+   */
+  async listSuggestions(options) {
+    const se = new SuggestionEngine(this.db);
+    return se.list(options);
+  }
+
+  /**
+   * 批准建议（只改状态，不执行操作）
+   */
+  async approveSuggestion(id) {
+    const se = new SuggestionEngine(this.db);
+    return se.approve(id);
+  }
+
+  /**
+   * 执行已批准的建议（创建 relation）
+   */
+  async executeApprovedSuggestion(id) {
+    const se = new SuggestionEngine(this.db);
+    const suggestion = await se.get(id);
+    if (!suggestion) throw new Error('建议不存在');
+    if (suggestion.status !== 'approved') throw new Error('建议尚未审批');
+
+    if (suggestion.type === 'relation' && suggestion.source && suggestion.target) {
+      const relType = (suggestion.payload && suggestion.payload.suggestedType) || 'reference';
+      return this.createRelation(suggestion.source, suggestion.target, relType);
+    }
+    throw new Error(`不支持的建议类型: ${suggestion.type}`);
+  }
+
+  /**
+   * 拒绝建议
+   */
+  async rejectSuggestion(id) {
+    const se = new SuggestionEngine(this.db);
+    return se.reject(id);
+  }
+
+  /**
+   * 建议统计
+   */
+  async getSuggestionStats() {
+    const se = new SuggestionEngine(this.db);
+    return se.stats();
+  }
+
+  /**
+   * AI 知识问答
+   * @param {string} query
+   */
+  async askKnowledge(query) {
+    const builder = await this._getAIContextBuilder();
+    const analyzer = await this._getKnowledgeAnalyzer();
+    const rec = await this._getRecommendationEngine();
+    const assistant = new KnowledgeAssistant(builder, analyzer, rec);
+    return assistant.ask(query);
+  }
+
+  /**
+   * AI 解释资源
+   * @param {string} rid
+   */
+  async explainWithAI(rid) {
+    const builder = await this._getAIContextBuilder();
+    const analyzer = await this._getKnowledgeAnalyzer();
+    const assistant = new KnowledgeAssistant(builder, analyzer);
+    return assistant.explain(rid);
+  }
+
+  /**
+   * AI 摘要资源
+   * @param {string} rid
+   */
+  async summarizeWithAI(rid) {
+    const builder = await this._getAIContextBuilder();
+    const analyzer = await this._getKnowledgeAnalyzer();
+    const assistant = new KnowledgeAssistant(builder, analyzer);
+    return assistant.summarize(rid);
+  }
+
+  /**
+   * AI Memory 操作
+   */
+  async getAIMemory() {
+    return new AIMemory(this.db);
   }
 
   async exportGraph(format = 'json', options = {}) {

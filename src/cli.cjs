@@ -646,7 +646,46 @@ cli
 
       .command('timeline', '知识演化时间线', {}, graphCmd.knowledgeTimeline)
 
-      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline');
+      .command('ai', 'AI 知识助手', (yargs) => {
+        yargs
+          .command('explain <resource>', 'AI 解释资源位置', (yargs) => {
+            yargs.positional('resource', { type: 'string', description: '资源名称或 RID' });
+          }, graphCmd.knowledgeAIExplain)
+
+          .command('summarize <resource>', 'AI 为资源生成摘要', (yargs) => {
+            yargs.positional('resource', { type: 'string', description: '资源名称或 RID' });
+          }, graphCmd.knowledgeAISummarize)
+
+          .command('ask [query]', 'AI 知识问答', (yargs) => {
+            yargs
+              .positional('query', { type: 'string', description: '问题（如"缺什么"、"核心节点"、"推荐"）', default: 'overview' });
+          }, graphCmd.knowledgeAIAsk)
+
+          .demandCommand(1, '请指定 AI 子命令。可用: explain, summarize, ask');
+      })
+
+      .demandCommand(1, '请指定知识子命令。可用: analyze, gaps, recommend, timeline, ai');
+  })
+
+  .command('suggestion', 'AI 建议管理（Phase 5.8）', (yargs) => {
+    yargs
+      .command('list', '查看建议列表', (yargs) => {
+        yargs.option('status', { type: 'string', description: '过滤状态: pending/approved/rejected' });
+      }, graphCmd.suggestionList)
+
+      .command('approve <id>', '批准 AI 建议', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Suggestion ID' });
+      }, graphCmd.suggestionApprove)
+
+      .command('execute <id>', '执行已批准的建议（创建 relation）', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Suggestion ID' });
+      }, graphCmd.suggestionExecute)
+
+      .command('reject <id>', '拒绝 AI 建议', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Suggestion ID' });
+      }, graphCmd.suggestionReject)
+
+      .demandCommand(1, '请指定建议子命令。可用: list, approve, execute, reject');
   })
 
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {

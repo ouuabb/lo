@@ -285,6 +285,9 @@ class Database {
 
     // V9: relations 表升级（Phase 5.1）
     await this._migrateRelationsV9();
+
+    // V10: ai_suggestions + ai_memory 表（Phase 5.8）
+    await this._migrateAIV10();
   }
 
   run(sql, params = []) {
@@ -728,6 +731,50 @@ class Database {
       );
     } catch (e) {
       console.error('[migrate] relations V9 失败:', e.message);
+    }
+  }
+
+  /**
+   * V10: AI 辅助表（Phase 5.8）
+   *   ai_suggestions — AI 建议队列
+   *   ai_memory      — AI 分析缓存
+   */
+  async _migrateAIV10() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_suggestions (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL DEFAULT 'relation',
+          source_rid TEXT,
+          target_rid TEXT,
+          payload TEXT DEFAULT '{}',
+          confidence REAL DEFAULT 0,
+          reason TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created INTEGER,
+          updated INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE INDEX IF NOT EXISTS idx_ai_suggestions_status ON ai_suggestions(status)
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS ai_memory (
+          id TEXT PRIMARY KEY,
+          rid TEXT,
+          type TEXT NOT NULL,
+          content TEXT DEFAULT '{}',
+          created INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE INDEX IF NOT EXISTS idx_ai_memory_rid ON ai_memory(rid)
+      `);
+    } catch (e) {
+      console.error('[migrate] AI V10 失败:', e.message);
     }
   }
 

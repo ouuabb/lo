@@ -743,6 +743,188 @@ async function knowledgeTimelineHandler() {
   }
 }
 
+// ═══════════ Phase 5.8: Suggestion Handlers ═══════════
+
+async function suggestionListHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const { status } = argv;
+    const stats = await repo.getSuggestionStats();
+    const suggestions = await repo.listSuggestions({ status, limit: 50 });
+
+    console.log(chalk.bold.cyan('\n  AI Suggestions'));
+    console.log(chalk.gray(`  pending: ${stats.pending} | approved: ${stats.approved} | rejected: ${stats.rejected}`));
+    console.log(chalk.gray('  ───────────────────────────────'));
+
+    const display = status ? suggestions : suggestions.filter(s => s.status === 'pending');
+    if (display.length === 0) {
+      console.log(chalk.gray(status ? `\n  No ${status} suggestions.` : '\n  No pending suggestions.'));
+    } else {
+      for (const s of display) {
+        const icon = s.status === 'approved' ? chalk.green('✓') : s.status === 'rejected' ? chalk.red('✗') : chalk.yellow('?');
+        console.log(chalk.bold(`\n  ${icon} [${s.id}]  ${s.status}`));
+        console.log(`    ${chalk.cyan(s.source)}  ${chalk.gray('→')}  ${chalk.cyan(s.target)}`);
+        console.log(`    type: ${chalk.yellow((s.payload && s.payload.suggestedType) || 'reference')}  confidence: ${s.confidence}`);
+        console.log(`    ${chalk.gray(s.reason)}`);
+      }
+    }
+
+    if (stats.pending > 0) {
+      console.log(chalk.gray('\n  Use "lo suggestion approve <id>" or "lo suggestion reject <id>"'));
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`建议列表查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function suggestionApproveHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const suggestion = await repo.approveSuggestion(argv.id);
+    console.log(chalk.green(`\n  Approved: ${suggestion.id}`));
+    console.log(chalk.gray(`  ${suggestion.source} → ${suggestion.target}`));
+    console.log(chalk.gray(`  Run "lo suggestion execute ${suggestion.id}" to apply.`));
+    console.log('');
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`审批失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function suggestionExecuteHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.executeApprovedSuggestion(argv.id);
+    console.log(chalk.green(`\n  Executed: relation ${result.type} created`));
+    console.log(chalk.gray(`  ${result.from_rid} → ${result.to_rid}`));
+    console.log('');
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`执行失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function suggestionRejectHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    await repo.rejectSuggestion(argv.id);
+    console.log(chalk.yellow(`\n  Rejected: ${argv.id}`));
+    console.log('');
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`拒绝失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// ═══════════ Phase 5.8: AI Knowledge Handlers ═══════════
+
+async function knowledgeAIExplainHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const res = await repo.resolveResource(argv.resource);
+    if (!res) {
+      Logger.error(`资源不存在: ${argv.resource}`);
+      await repo.close();
+      process.exit(1);
+    }
+
+    const result = await repo.explainWithAI(res.rid);
+    if (!result) {
+      console.log(chalk.gray('\n  No context available for this resource.'));
+    } else {
+      console.log(chalk.bold.cyan('\n  AI Explanation'));
+      console.log(chalk.gray('  ───────────────────────────────'));
+      console.log('');
+      console.log(result.text);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 解释失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function knowledgeAISummarizeHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const res = await repo.resolveResource(argv.resource);
+    if (!res) {
+      Logger.error(`资源不存在: ${argv.resource}`);
+      await repo.close();
+      process.exit(1);
+    }
+
+    const result = await repo.summarizeWithAI(res.rid);
+    if (!result) {
+      console.log(chalk.gray('\n  No summary available for this resource.'));
+    } else {
+      console.log(chalk.bold.cyan('\n  AI Summary'));
+      console.log(chalk.gray('  ───────────────────────────────'));
+      console.log('');
+      console.log(result.text);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 摘要失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function knowledgeAIAskHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const query = argv.query || argv._.slice(1).join(' ') || 'overview';
+    const result = await repo.askKnowledge(query);
+
+    console.log(chalk.bold.cyan('\n  AI Knowledge Assistant'));
+    console.log(chalk.gray(`  Q: ${query}`));
+    console.log(chalk.gray('  ───────────────────────────────'));
+    console.log('');
+    console.log(result.text);
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`AI 问答失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -759,5 +941,12 @@ module.exports = {
   knowledgeAnalyze: knowledgeAnalyzeHandler,
   knowledgeGaps: knowledgeGapsHandler,
   knowledgeRecommend: knowledgeRecommendHandler,
-  knowledgeTimeline: knowledgeTimelineHandler
+  knowledgeTimeline: knowledgeTimelineHandler,
+  suggestionList: suggestionListHandler,
+  suggestionApprove: suggestionApproveHandler,
+  suggestionExecute: suggestionExecuteHandler,
+  suggestionReject: suggestionRejectHandler,
+  knowledgeAIExplain: knowledgeAIExplainHandler,
+  knowledgeAISummarize: knowledgeAISummarizeHandler,
+  knowledgeAIAsk: knowledgeAIAskHandler
 };
