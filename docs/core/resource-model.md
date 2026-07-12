@@ -69,7 +69,7 @@ Slug 是从标题通过以下规则生成的：
 |------|------|------|
 | title | string | 从 # heading 提取，非空字符串 |
 | wordCount | number | 词数统计，整数 >= 0 |
-| tags | string[] | 标签列表，元素为非空字符串 |
+| tags | string[] | 标签列表，独立储存在 `resource_tags` 表（V24 从 metadata JSON 分离）|
 | category | string\|null | 分类（路径式多级，如"编程/Python"）|
 | status | string | draft / published / archived |
 | conflict | boolean | 同步冲突标记（系统自动设置）|
@@ -135,7 +135,7 @@ lo 的 Resource 模型将"资源身份"与"内容来源"解耦：
 - `rid` — 唯一标识符
 - `name` — 逻辑名称（全局唯一，活跃层）
 - `type` — 资源类型（project, album, dataset, course, collection, note, code...）
-- `capabilities` — JSON 数组，描述资源的能力（如 `["container"]`）
+- `capabilities` — 独立表 `resource_capabilities`（resource_rid + capability），标识容器的"container"能力等
 - `container_schema` — JSON 对象，容器的成员规则
 
 Resource 的 type 决定其默认行为：

@@ -32,7 +32,7 @@ lo find "闭包"
 `lo find` 在以下字段中搜索：
 - `metadata.title`：笔记标题
 - 文件内容：Markdown 正文（通过解密后匹配）
-- `metadata.tags`：标签名称
+- `resource_tags` 表：标签名称（通过 JOIN）
 
 ### 搜索精度
 

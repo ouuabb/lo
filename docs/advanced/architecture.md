@@ -69,7 +69,7 @@ flowchart TB
 
 位置：`.repo/database.sqlite`
 
-表结构（共 6 张表）：
+表结构（52 张表，覆盖资源、容器、权限、智能体、工作流、AI 记忆、同步、审计等子系统）：
 
 | 表名 | 用途 |
 |------|------|
@@ -79,6 +79,7 @@ flowchart TB
 | sync_config | KV 配置（设备ID、锚点、远程别名）|
 | commits | 版本提交历史 |
 | sync_log | 同步活动审计日志 |
+| ... | 以及 46 张子系统表（权限、智能体、工作流、AI 记忆、容器、运行时等），详见[数据库结构](/core/database) |
 
 索引：
 - `resources(type)` — 按类型过滤
@@ -218,7 +219,7 @@ async onLoad(repo) {
 3. **无 WAL 模式**：SQLite 默认 rollback journal，读写互斥
 4. **metadata 不跨类型**：仅 note 类型自动提取 title 和 wordCount
 5. **sync 协议非 CRDT**：冲突时 last-write-wins + 本地备份，需手动处理
-6. **数据一致性**：见[数据一致性审计](/architecture/data-consistency) — 非数据库存储、Service 层绕过、事务缺口等 15 项高危问题
+6. **数据一致性**：V24/V25 已修复 16 项数据一致性问题（标签/能力/权限独立表、AI 记忆持久化、Service 层覆盖）— 详请见[数据一致性审计](/architecture/data-consistency)
 
 ### 八、优化路线图
 

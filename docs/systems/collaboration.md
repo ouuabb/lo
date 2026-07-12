@@ -13,7 +13,7 @@
 | MessageBus | 消息总线，团队内部消息传递 |
 | TaskPlanner | 任务规划器，将目标分解为子任务 |
 | TaskDispatcher | 任务分发器，根据 Agent 能力分配任务 |
-| SharedMemory | 团队共享记忆，存储决策记录和经验 |
+| SharedMemory | 团队共享记忆，存储决策记录和经验（持久化到 `shared_memory` 表）|
 | CollaborationMemory | 团队/任务持久化存储 |
 
 ### 二、团队模型

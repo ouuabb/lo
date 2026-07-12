@@ -39,9 +39,10 @@ lo permission role assign <role>    # 分配角色给用户
 
 **数据表结构：**
 
-- `roles` — 角色定义（id, name, description, permissions JSON）
+- `roles` — 角色定义（id, name, description）
+- `role_permissions` — 角色权限绑定（role_id, permission），权限已从 roles 表的 JSON 列迁移到独立表
 - `subjects_roles` — 角色分配（subject_id, role_id）
-- `permissions` — 直接权限（subject_id, action）
+- `resource_acl` — 资源级 ACL（resource_id, subject_id, permission, deny）
 
 ### 三、ABAC 策略
 

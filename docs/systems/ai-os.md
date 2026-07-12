@@ -73,7 +73,7 @@ Request → Context Builder → Reasoning → Planner → Executor → Response
 
 **语义记忆（SemanticMemory）：**
 
-存储对知识库的深层理解：
+存储对知识库的深层理解（持久化到 `ai_memory` 表）：
 
 | 记忆内容 | 说明 |
 |----------|------|
@@ -84,7 +84,7 @@ Request → Context Builder → Reasoning → Planner → Executor → Response
 
 **概念记忆（ConceptMemory）：**
 
-存储知识本体结构：领域类型、约束规则、分类体系。
+存储知识本体结构（持久化到 `ai_concepts` 表）：领域类型、约束规则、分类体系。
 
 **与 Agent 记忆的区别：**
 

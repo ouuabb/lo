@@ -6,26 +6,76 @@ lo 使用 SQLite 作为本地数据库。
 
 | 表名 | 用途 |
 |------|------|
-| resources | 资源元数据（RID、路径、哈希、类型、加密状态、标签、分类等）|
+| resources | 资源元数据（RID、路径、哈希、类型、加密状态等）|
 | relations | 资源间的双向链接关系（wikilink / reference）|
 | commits | 提交历史记录 |
 | sync_ops | 操作日志，同步的基本单位 |
 | sync_config | 配置键值对（设备 ID、同步锚点、远程别名）|
 | sync_log | 同步活动审计日志 |
+| resource_tags | 标签（独立表，V24 从 metadata JSON 迁移）|
+| resource_capabilities | 资源能力（独立表，V24 从 capabilities 列迁移）|
+| resource_sources | 资源内容来源绑定 |
+| container_members | 容器成员列表 |
+| container_ignore_patterns | 容器忽略规则（V24 从 container_schema JSON 迁移）|
+| container_operations | 容器操作审计日志 |
+| container_transactions | 容器操作事务记录 |
+| staging_changes | 暂存区（V25 从 staging.json 迁移）|
+| roles | 角色定义 |
+| role_permissions | 角色权限绑定（V24 从 roles.permissions 列迁移）|
+| subjects_roles | 角色分配 |
+| resource_acl | 资源级访问控制列表 |
+| permission_audit | 权限审计日志 |
+| policies | ABAC 策略定义 |
+| policy_actions | 策略动作（V24 从 policies.action 列迁移）|
+| identities | 身份定义 |
+| security_audit | 安全审计日志 |
+| credentials | 凭据存储 |
+| agents | 智能体定义 |
+| agent_runs | 智能体执行记录 |
+| agent_memory | 智能体三层记忆 |
+| agent_messages | 智能体消息 |
+| agent_teams | 智能体团队 |
+| agent_tasks | 智能体任务 |
+| workflows | 工作流定义 |
+| workflow_executions | 工作流执行记录 |
+| ai_memory | AI 语义记忆（V25 从内存持久化）|
+| ai_concepts | AI 概念记忆（V25 从内存持久化）|
+| ai_suggestions | AI 建议 |
+| ai_interactions | AI 交互记录 |
+| ai_learning | AI 学习记录 |
+| evolution_states | 自演化状态快照 |
+| evolution_actions | 自演化动作（V25 从内存持久化）|
+| evolution_history | 自演化历史 |
+| shared_memory | 团队共享记忆（V25 从内存持久化）|
+| knowledge_events | 知识事件 |
+| knowledge_snapshots | 知识快照 |
+| sync_records | 同步记录 |
+| sync_batches | 同步批次 |
+| conflicts | 同步冲突记录 |
+| remote_resources | 远程资源映射 |
+| repositories | 外部仓库引用 |
+| plugins | 插件注册表 |
+| plugin_settings | 插件设置 |
+| events | 事件历史 |
+| runtime_instances | Runtime 实例 |
+| runtime_events | Runtime 事件 |
+| runtime_state | Runtime 状态 |
 
 ### resources 表结构
 
 ```sql
 CREATE TABLE resources (
     rid          TEXT PRIMARY KEY,     -- 资源唯一标识 (res_xxx)
+    name         TEXT,                 -- 逻辑名称（活跃层唯一）
     type         TEXT,                 -- 资源类型 (note, image, pdf, ...)
     path         TEXT,                 -- resources/ 下的相对路径
     hash         TEXT,                 -- 明文 SHA-256（变更检测）
-    metadata     TEXT,                 -- JSON 元数据（标题、字数、标签、分类、状态等）
+    layer        INTEGER DEFAULT 0,    -- 栈层号（0=活跃，1-19=栈）
+    metadata     TEXT,                 -- JSON 元数据（标题、字数、分类、状态等）
     encrypted    INTEGER,              -- 是否加密 (0/1)
     created      INTEGER,              -- 创建时间戳 (ms)
-    updated      INTEGER,             -- 最后修改时间戳 (ms)
-    deleted      INTEGER              -- 是否软删除 (0/1)
+    updated      INTEGER,              -- 最后修改时间戳 (ms)
+    deleted      INTEGER               -- 是否软删除 (0/1)
 );
 ```
 
@@ -35,7 +85,7 @@ CREATE TABLE resources (
 - **type**：资源类型（note, image, pdf, video, audio, html, text, json, document, spreadsheet, presentation, archive, drawing, code, unknown）
 - **path**：文件系统路径（`resources/` 下的相对路径）
 - **hash**：明文 SHA-256 散列，用于变更检测和去重检测
-- **metadata**：JSON 格式元数据，包含 title、wordCount、tags、category、status 等字段
+- **metadata**：JSON 格式元数据，包含 title、wordCount、category、status 等字段。tags 已独立为 `resource_tags` 表
 - **encrypted**：加密状态（0=明文, 1=已加密）
 - **deleted**：软删除标记（0=正常, 1=已删除）
 
@@ -73,6 +123,7 @@ CREATE TABLE relations (
 
 - `resources(type)` — 按类型过滤
 - `resources(path)` — 按路径查找
+- `resources(name, layer)` — 唯一约束（同名不同 layer 允许）
 - `sync_ops(timestamp)` — 按时间查询操作日志
 - `sync_ops(device_id)` — 按设备过滤操作
 - `relations(from_rid, to_rid, type)` — 唯一约束
@@ -82,7 +133,7 @@ CREATE TABLE relations (
 - 未开启 WAL 模式（默认 rollback journal）
 - 无 full-text search（FTS）索引
 - 无 `resources(hash)` 索引
-- metadata 是 JSON 字符串列，不可在 SQL 中按子字段过滤
+- 标签和分类不再存在 metadata JSON 中：tags → `resource_tags` 表，category 仍在 metadata 中
 
 ### 加密感知
 
