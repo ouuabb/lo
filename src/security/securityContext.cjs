@@ -2,19 +2,58 @@
  * SecurityContext — 安全上下文
  *
  * Phase 6.4: 保存当前执行环境的权限信息。
+ * Phase 6.9: 集成 Identity、请求追踪、时间戳。
  */
+
+const crypto = require('crypto');
 
 class SecurityContext {
   /**
    * @param {object} opts
-   * @param {import('./subject.cjs')} [opts.subject]
-   * @param {string[]} [opts.roles] — 角色 ID 列表
-   * @param {string[]} [opts.permissions] — 直接授予的权限
+   * @param {import('./subject.cjs')|import('./identity.cjs')} [opts.subject]
+   * @param {string[]} [opts.roles]        — 角色 ID 列表
+   * @param {string[]} [opts.permissions]   — 直接授予的权限
+   * @param {string} [opts.source]         — 来源（CLI/API/Plugin/Agent/Workflow）
+   * @param {string} [opts.requestId]      — 请求追踪 ID
+   * @param {number} [opts.timestamp]      — 创建时间戳
    */
-  constructor({ subject, roles, permissions } = {}) {
+  constructor({ subject, roles, permissions, source, requestId, timestamp } = {}) {
     this.subject = subject || require('./subject.cjs').currentUser();
     this.roles = roles || ['owner'];
     this.permissions = permissions || [];
+    this.source = source || 'cli';
+    this.requestId = requestId || this._generateRequestId();
+    this.timestamp = timestamp || Date.now();
+  }
+
+  /**
+   * 从 Identity 创建
+   * @param {import('./identity.cjs')} identity
+   * @param {object} [opts]
+   */
+  static fromIdentity(identity, opts = {}) {
+    const Identity = require('./identity.cjs');
+    const Subject = require('./subject.cjs');
+
+    // 映射 identity type → subject 构造
+    let subject;
+    switch (identity.type) {
+      case 'user':     subject = new Subject(identity.id, 'user', identity.metadata); break;
+      case 'agent':    subject = Subject.aiAgent(identity.id); break;
+      case 'plugin':   subject = new Subject(identity.id, 'plugin', identity.metadata); break;
+      case 'workflow': subject = new Subject(identity.id, 'workflow', identity.metadata); break;
+      case 'service':  subject = new Subject(identity.id, 'user', identity.metadata); break;
+      default:        subject = new Subject(identity.id, 'user', identity.metadata);
+    }
+
+    return new SecurityContext({
+      subject,
+      roles: opts.roles || ['viewer'],
+      permissions: opts.permissions || [],
+      source: opts.source || identity.type,
+      requestId: opts.requestId,
+      timestamp: opts.timestamp || Date.now()
+    });
   }
 
   /**
@@ -41,6 +80,21 @@ class SecurityContext {
     }
 
     return Array.from(perms);
+  }
+
+  toJSON() {
+    return {
+      subject: this.subject ? (typeof this.subject.toJSON === 'function' ? this.subject.toJSON() : this.subject) : null,
+      roles: this.roles,
+      permissions: this.permissions,
+      source: this.source,
+      requestId: this.requestId,
+      timestamp: this.timestamp
+    };
+  }
+
+  _generateRequestId() {
+    return `req_${crypto.randomBytes(8).toString('hex')}`;
   }
 }
 

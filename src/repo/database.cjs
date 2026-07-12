@@ -321,6 +321,9 @@ class Database {
 
     // V21: Knowledge OS Self-Evolution（Phase 6.8）
     await this._migrateEvolutionV21();
+
+    // V22: Phase 6.9 Permission & Security System
+    await this._migrateSecurityV22();
   }
 
   run(sql, params = []) {
@@ -1275,6 +1278,78 @@ class Database {
       `);
     } catch (e) {
       console.error('[migrate] Evolution V21 失败:', e.message);
+    }
+  }
+
+  /**
+   * V22: Phase 6.9 Permission & Security System
+   *   identities      — 多类型身份
+   *   policies        — 声明式安全策略
+   *   security_audit  — 安全审计日志
+   *   credentials     — 认证凭据
+   */
+  async _migrateSecurityV22() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS identities (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          name TEXT,
+          provider TEXT DEFAULT 'local',
+          metadata TEXT DEFAULT '{}',
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS policies (
+          id TEXT PRIMARY KEY,
+          subject TEXT NOT NULL,
+          resource TEXT NOT NULL,
+          action TEXT NOT NULL,
+          effect TEXT NOT NULL DEFAULT 'allow',
+          priority INTEGER DEFAULT 0,
+          condition_JSON TEXT,
+          metadata TEXT DEFAULT '{}',
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS security_audit (
+          id TEXT PRIMARY KEY,
+          actor TEXT NOT NULL,
+          action TEXT NOT NULL,
+          resource TEXT DEFAULT '',
+          result TEXT DEFAULT '',
+          reason TEXT DEFAULT '',
+          metadata TEXT DEFAULT '{}',
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_actor ON security_audit(actor)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_result ON security_audit(result)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_created ON security_audit(created_at)`);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS credentials (
+          id TEXT PRIMARY KEY,
+          identity_id TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'api-key',
+          token_hash TEXT,
+          expires_at INTEGER,
+          created_at INTEGER,
+          metadata TEXT DEFAULT '{}'
+        )
+      `);
+
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_cred_identity ON credentials(identity_id)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_cred_hash ON credentials(token_hash)`);
+
+      console.log('[migrate] Security V22 ok');
+    } catch (e) {
+      console.error('[migrate] Security V22 失败:', e.message);
     }
   }
 

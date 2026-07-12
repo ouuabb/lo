@@ -20,6 +20,7 @@ const link = require('./commands/link.cjs');
 const unlink = require('./commands/unlink.cjs');
 const relationCmd = require('./commands/relation.cjs');
 const graphCmd = require('./commands/graph.cjs');
+const securityCmd = require('./commands/security.cjs');
 const move = require('./commands/move.cjs');
 const backup = require('./commands/backup.cjs');
 const daily = require('./commands/daily.cjs');
@@ -847,6 +848,39 @@ cli
       .command('audit', '权限审计日志', {}, graphCmd.permissionAudit)
 
       .demandCommand(1, '请指定权限子命令。可用: role, check, grant, audit');
+  })
+
+  .command('security', '安全系统（Phase 6.9）', (yargs) => {
+    yargs
+      .command('identity', '身份管理', (yargs) => {
+        yargs
+          .command('list', '列出身份', {}, securityCmd.identityList)
+          .command('create <type> <id> [name]', '创建身份', (yargs) => {
+            yargs.positional('type', { type: 'string', description: '身份类型（user/agent/plugin/workflow/service）' });
+            yargs.positional('id', { type: 'string', description: '身份 ID' });
+            yargs.positional('name', { type: 'string', description: '名称（可选）' });
+          }, securityCmd.identityCreate)
+          .demandCommand(1, '请指定 identity 子命令。可用: list, create');
+      })
+
+      .command('check <subject> <action>', '权限检查', (yargs) => {
+        yargs.positional('subject', { type: 'string', description: '主体' });
+        yargs.positional('action', { type: 'string', description: '权限代码（如 resource.read）' });
+        yargs.option('resource', { alias: 'r', type: 'string', description: '资源 RID（可选）' });
+      }, securityCmd.checkPermission)
+
+      .command('policy', '策略管理', (yargs) => {
+        yargs
+          .command('list', '列出策略', {}, securityCmd.policyList)
+          .demandCommand(1, '请指定 policy 子命令。可用: list');
+      })
+
+      .command('audit', '安全审计', (yargs) => {
+        yargs.option('actor', { type: 'string', description: '按操作者过滤' });
+        yargs.option('limit', { type: 'number', description: '返回条数（默认 30）' });
+      }, securityCmd.securityAudit)
+
+      .demandCommand(1, '请指定 security 子命令。可用: identity, check, policy, audit');
   })
 
   .command('agent', '知识智能体（Phase 6.5）', (yargs) => {

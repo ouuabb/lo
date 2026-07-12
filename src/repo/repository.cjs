@@ -55,6 +55,7 @@ const WorkflowScheduler = require('../workflow/workflowScheduler.cjs');
 const PermissionManager = require('../security/permissionManager.cjs');
 const PolicyEngine = require('../security/policyEngine.cjs');
 const PermissionAudit = require('../security/permissionAudit.cjs');
+const SecurityManager = require('../security/securityManager.cjs');
 const Agent = require('../agent/agent.cjs');
 const AgentRegistry = require('../agent/agentRegistry.cjs');
 const AgentEngine = require('../agent/agentEngine.cjs');
@@ -2475,6 +2476,32 @@ class Repository {
   async getDeniedPermissionStats() {
     const audit = new PermissionAudit(this.db);
     return audit.deniedStats();
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.9: Security Manager（统一安全入口）
+  // ──────────────────────────────────────
+
+  _getSecurityManager() {
+    if (!this._securityManager) {
+      this._securityManager = new SecurityManager({
+        db: this.db,
+        eventBus: this._eventBus,
+        logger: this.logger
+      });
+    }
+    return this._securityManager;
+  }
+
+  async initSecuritySystem() {
+    const sec = this._getSecurityManager();
+    await sec.initialize();
+    return sec;
+  }
+
+  /** @type {SecurityManager} */
+  get security() {
+    return this._getSecurityManager();
   }
 
   // ──────────────────────────────────────

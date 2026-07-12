@@ -1,47 +1,110 @@
 /**
- * PolicyEngine — 策略引擎
+ * PolicyEngine — 策略引擎（增强版）
  *
  * Phase 6.4: 核心权限决策模块。
+ * Phase 6.9: 集成 Policy 声明式策略评估，deny > allow 规则。
  *
  * 流程:
  *   Can(subject, action, resource)?
- *     1. 检查 Subject 直接权限
+ *     1. 检查声明式 Policy（deny 优先于 allow）
  *     2. 检查 Role 权限
- *     3. 检查 Resource ACL（如果指定了 resource）
- *     4. 返回 { allowed, reason }
+ *     3. 检查 Subject 直接权限
+ *     4. 检查 Resource ACL（如果指定了 resource）
+ *     5. 返回 { allowed, reason }
  */
 
 const Permission = require('./permission.cjs');
 const ResourcePolicy = require('./resourcePolicy.cjs');
+const Policy = require('./policy.cjs');
 
 class PolicyEngine {
   /**
    * @param {object} services
    * @param {import('./permissionManager.cjs')} services.permissionManager
    * @param {import('./permissionAudit.cjs')} [services.audit]
+   * @param {object} [services.db]            — 用于加载声明式策略
    * @param {object} [services.logger]
    */
   constructor(services = {}) {
     this.permissionManager = services.permissionManager || null;
     this.audit = services.audit || null;
+    this.db = services.db || null;
     this.logger = services.logger || console;
+    this._policies = null; // 懒加载
+  }
+
+  /**
+   * 加载声明式策略（从 DB）
+   */
+  async loadPolicies() {
+    if (this._policies !== null) return this._policies;
+    if (!this.db) { this._policies = []; return []; }
+
+    try {
+      const rows = await this.db.all('SELECT * FROM policies ORDER BY priority DESC');
+      this._policies = rows.map(r => new Policy({
+        id: r.id, subject: r.subject, resource: r.resource,
+        actions: JSON.parse(r.action || '[]'),
+        effect: r.effect, priority: r.priority || 0,
+        condition: r.condition_JSON ? JSON.parse(r.condition_JSON) : null,
+        metadata: r.metadata ? JSON.parse(r.metadata) : {}
+      }));
+    } catch {
+      this._policies = [];
+    }
+    return this._policies;
+  }
+
+  /**
+   * 清除策略缓存
+   */
+  invalidatePolicyCache() {
+    this._policies = null;
   }
 
   /**
    * 检查权限
-   * @param {string|import('./subject.cjs')} subject
+   * @param {string|object} subject
    * @param {string} action — 权限代码，如 'resource.read'
    * @param {string} [resource] — 资源 RID（可选，用于 ACL）
-   * @returns {{ allowed: boolean, reason: string }}
+   * @returns {Promise<{ allowed: boolean, reason: string }>}
    */
   async check(subject, action, resource) {
     const subjectId = typeof subject === 'string' ? subject : subject.id;
     const perm = new Permission(action);
 
-    // 1. 检查 Role 权限
     if (this.permissionManager) {
-      const roles = this.permissionManager.getSubjectRoles(subjectId);
+      // 1. 检查声明式 Policy（Phase 6.9）
+      const policies = await this.loadPolicies();
+      let explicitDecision = null; // null 表示无匹配
 
+      for (const policy of policies) {
+        const context = {
+          subject: typeof subject === 'object' ? subject : { id: subjectId },
+          resource: resource ? { id: resource } : undefined
+        };
+
+        if (policy.matches(subjectId, action, resource || '')) {
+          if (policy.evaluateCondition(context)) {
+            if (policy.effect === 'deny') {
+              await this._audit(subjectId, action, resource, false, `policy:${policy.id}`);
+              return { allowed: false, reason: `policy:${policy.id}` };
+            }
+            // allow 匹配 — 记录但不立即返回，因为后面可能有 deny
+            if (!explicitDecision) {
+              explicitDecision = { allowed: true, reason: `policy:${policy.id}` };
+            }
+          }
+        }
+      }
+
+      if (explicitDecision) {
+        await this._audit(subjectId, action, resource, explicitDecision.allowed, explicitDecision.reason);
+        return explicitDecision;
+      }
+
+      // 2. 检查 Role 权限
+      const roles = this.permissionManager.getSubjectRoles(subjectId);
       for (const role of roles) {
         if (role.hasPermission(action)) {
           await this._audit(subjectId, action, resource, true, `role:${role.id}`);
@@ -49,7 +112,7 @@ class PolicyEngine {
         }
       }
 
-      // 2. 检查直接权限
+      // 3. 检查直接权限
       const directPerms = this.permissionManager.getSubjectPermissions(subjectId);
       for (const dp of directPerms) {
         if (perm.matches(dp)) {
@@ -58,7 +121,7 @@ class PolicyEngine {
         }
       }
 
-      // 3. 检查 Resource ACL
+      // 4. 检查 Resource ACL
       if (resource) {
         const acl = this.permissionManager.getResourceACL(resource);
         if (acl) {
