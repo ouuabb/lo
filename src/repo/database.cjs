@@ -17,7 +17,6 @@ class Database {
         if (err) {
           reject(err);
         } else {
-          // 启用外键约束（SQLite 默认关闭）
           this.db.run('PRAGMA foreign_keys = ON', (err2) => {
             if (err2) reject(err2);
             else resolve(this);
@@ -34,305 +33,729 @@ class Database {
   }
 
   async createTables() {
+    // ======================== 核心资源表 ========================
     await this.run(`
       CREATE TABLE IF NOT EXISTS resources (
-        rid TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        layer INTEGER NOT NULL DEFAULT 0,
-        type TEXT NOT NULL,
-        path TEXT NOT NULL,
-        hash TEXT,
-        metadata TEXT DEFAULT '{}',
-        encrypted INTEGER DEFAULT 0,
-        created INTEGER NOT NULL,
-        updated INTEGER NOT NULL,
-        deleted INTEGER DEFAULT 0
+        rid               TEXT PRIMARY KEY,
+        name              TEXT NOT NULL,
+        layer             INTEGER NOT NULL DEFAULT 0,
+        type              TEXT NOT NULL,
+        path              TEXT NOT NULL,
+        hash              TEXT,
+        metadata          TEXT DEFAULT '{}',
+        encrypted         INTEGER DEFAULT 0,
+        created           INTEGER NOT NULL,
+        updated           INTEGER NOT NULL,
+        deleted           INTEGER DEFAULT 0,
+        container_schema  TEXT DEFAULT '{}'
       )
     `);
 
-    // 数据迁移：为已有仓库添加 encrypted 列
-    try {
-      await this.run('ALTER TABLE resources ADD COLUMN encrypted INTEGER DEFAULT 0');
-    } catch {
-      // 列已存在，忽略
-    }
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_resources_path ON resources(path)`);
+    await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_resources_name_layer ON resources(name, layer)`);
 
-    // 数据迁移：为已有仓库添加 name 列（资源逻辑名称，全局唯一）
-    try {
-      await this.run('ALTER TABLE resources ADD COLUMN name TEXT');
-    } catch {
-      // 列已存在，忽略
-    }
+    // 删除旧的单列 name 唯一索引（兼容旧库）
+    try { await this.run('DROP INDEX IF EXISTS idx_resources_name'); } catch {}
 
-    // 数据迁移：为已有仓库添加 layer 列（栈层级，0=活跃，1~19=栈）
-    try {
-      await this.run('ALTER TABLE resources ADD COLUMN layer INTEGER NOT NULL DEFAULT 0');
-    } catch {
-      // 列已存在，忽略
-    }
-
-    // 数据迁移：为已有仓库添加 capabilities 列（JSON 数组，如 ["container"]）
-    try {
-      await this.run('ALTER TABLE resources ADD COLUMN capabilities TEXT DEFAULT \'[]\'');
-    } catch {
-      // 列已存在，忽略
-    }
-
-    // 数据迁移：为已有仓库添加 container_schema 列（JSON 对象，定义容器规则）
-    try {
-      await this.run('ALTER TABLE resources ADD COLUMN container_schema TEXT DEFAULT \'{}\'');
-    } catch {
-      // 列已存在，忽略
-    }
+    // ======================== 标签 / 能力 / 容器忽略模式 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS resource_tags (
+        resource_rid  TEXT NOT NULL,
+        tag           TEXT NOT NULL,
+        PRIMARY KEY (resource_rid, tag),
+        FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_rt_tag ON resource_tags(tag)`);
 
     await this.run(`
+      CREATE TABLE IF NOT EXISTS resource_capabilities (
+        resource_rid  TEXT NOT NULL,
+        capability    TEXT NOT NULL,
+        PRIMARY KEY (resource_rid, capability),
+        FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_rc_cap ON resource_capabilities(capability)`);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS container_ignore_patterns (
+        container_rid  TEXT NOT NULL,
+        pattern        TEXT NOT NULL,
+        PRIMARY KEY (container_rid, pattern),
+        FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE
+      )
+    `);
+
+    // ======================== 关系表 ========================
+    await this.run(`
       CREATE TABLE IF NOT EXISTS relations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        from_rid TEXT NOT NULL,
-        to_rid TEXT NOT NULL,
-        type TEXT NOT NULL,
-        created INTEGER NOT NULL,
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_rid  TEXT NOT NULL,
+        to_rid    TEXT NOT NULL,
+        type      TEXT NOT NULL,
+        created   INTEGER NOT NULL,
+        metadata  TEXT DEFAULT '{}',
+        updated   INTEGER,
+        deleted   INTEGER DEFAULT 0,
         UNIQUE(from_rid, to_rid, type)
       )
     `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_rid)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_rid)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_relations_deleted ON relations(deleted)`);
 
-    await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type)
-    `);
-
-    await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_resources_path ON resources(path)
-    `);
-
-    // 删除旧的单列 name 唯一索引（迁移兼容）
-    try {
-      await this.run('DROP INDEX IF EXISTS idx_resources_name');
-    } catch {
-      // 忽略
-    }
-
-    await this.run(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_resources_name_layer ON resources(name, layer)
-    `);
-
-    await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_rid)
-    `);
-
-    await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_rid)
-    `);
-
+    // ======================== 同步 ========================
     await this.run(`
       CREATE TABLE IF NOT EXISTS sync_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp INTEGER NOT NULL,
-        action TEXT NOT NULL,
-        path TEXT,
-        details TEXT
+        action    TEXT NOT NULL,
+        path      TEXT,
+        details   TEXT
       )
     `);
 
     await this.run(`
       CREATE TABLE IF NOT EXISTS sync_config (
-        key TEXT PRIMARY KEY,
+        key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )
     `);
 
     await this.run(`
-      CREATE TABLE IF NOT EXISTS commits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        message TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        added INTEGER DEFAULT 0,
-        updated INTEGER DEFAULT 0,
-        deleted INTEGER DEFAULT 0,
-        renamed INTEGER DEFAULT 0,
-        metadata INTEGER DEFAULT 0,
-        merge INTEGER DEFAULT 0
-      )
-    `);
-
-    // 数据迁移：为已有仓库的 commits 表添加 updated 列
-    try {
-      await this.run('ALTER TABLE commits ADD COLUMN updated INTEGER DEFAULT 0');
-    } catch {
-      // 列已存在，忽略
-    }
-
-    // 数据迁移：为已有仓库的 commits 表添加 metadata 列
-    try {
-      await this.run('ALTER TABLE commits ADD COLUMN metadata INTEGER DEFAULT 0');
-    } catch {
-      // 列已存在，忽略
-    }
-
-    // 数据迁移：为已有仓库的 commits 表添加 merge 列（标识合并提交）
-    try {
-      await this.run('ALTER TABLE commits ADD COLUMN merge INTEGER DEFAULT 0');
-    } catch {
-      // 列已存在，忽略
-    }
-
-    // 同步操作日志（用于跨设备同步）
-    await this.run(`
       CREATE TABLE IF NOT EXISTS sync_ops (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        op_id TEXT NOT NULL UNIQUE,
-        op_type TEXT NOT NULL,
-        rid TEXT,
-        data TEXT NOT NULL,
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        op_id     TEXT NOT NULL UNIQUE,
+        op_type   TEXT NOT NULL,
+        rid       TEXT,
+        data      TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         device_id TEXT NOT NULL,
-        applied INTEGER DEFAULT 1
+        applied   INTEGER DEFAULT 1
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_ops_timestamp ON sync_ops(timestamp)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_ops_device ON sync_ops(device_id)`);
+
+    // ======================== 提交 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS commits (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        message   TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        added     INTEGER DEFAULT 0,
+        updated   INTEGER DEFAULT 0,
+        deleted   INTEGER DEFAULT 0,
+        renamed   INTEGER DEFAULT 0,
+        metadata  INTEGER DEFAULT 0,
+        merge     INTEGER DEFAULT 0
       )
     `);
 
+    // ======================== 暂存区 ========================
     await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_sync_ops_timestamp ON sync_ops(timestamp)
+      CREATE TABLE IF NOT EXISTS staging_changes (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        type        TEXT NOT NULL CHECK(type IN ('add','modify','delete','rename','metadata')),
+        path        TEXT NOT NULL,
+        old_path    TEXT,
+        rid         TEXT,
+        meta_json   TEXT,
+        created_at  INTEGER NOT NULL
+      )
     `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_staging_type ON staging_changes(type)`);
 
-    await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_sync_ops_device ON sync_ops(device_id)
-    `);
-
-    // ── Resource、Container Capability 与 Member 模型 ──
-
-    // Content Source 表：关联 Resource 与实际内容来源
+    // ======================== 资源来源 ========================
     await this.run(`
       CREATE TABLE IF NOT EXISTS resource_sources (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        resource_rid TEXT NOT NULL,
-        source_type TEXT NOT NULL,
-        location TEXT NOT NULL,
-        enabled INTEGER DEFAULT 1,
-        sync_mode TEXT DEFAULT 'manual',
-        last_scan_at INTEGER,
-        metadata TEXT DEFAULT '{}',
-        created_at INTEGER,
-        updated_at INTEGER,
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        resource_rid  TEXT NOT NULL,
+        source_type   TEXT NOT NULL,
+        location      TEXT NOT NULL,
+        enabled       INTEGER DEFAULT 1,
+        sync_mode     TEXT DEFAULT 'manual',
+        last_scan_at  INTEGER,
+        metadata      TEXT DEFAULT '{}',
+        created_at    INTEGER,
+        updated_at    INTEGER,
         FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
       )
     `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_resource_sources_rid ON resource_sources(resource_rid)`);
 
-    await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_resource_sources_rid ON resource_sources(resource_rid)
-    `);
-
-    // 迁移：为旧 resource_sources 增加 enabled/sync_mode/last_scan_at/created_at/updated_at 列
-    await this._migrateResourceSourcesV1();
-
-    // Container Members 表：具有 Container Capability 的 Resource 的成员
+    // ======================== 容器成员 ========================
     await this.run('PRAGMA foreign_keys = ON');
     await this.run(`
       CREATE TABLE IF NOT EXISTS container_members (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        container_rid TEXT NOT NULL,
-        source_id INTEGER,
-        resource_rid TEXT,
-        path TEXT NOT NULL,
-        name TEXT NOT NULL,
-        size INTEGER DEFAULT 0,
-        hash TEXT,
-        modified_time INTEGER,
-        status TEXT DEFAULT 'indexed',
-        force_ignore INTEGER DEFAULT 0,
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        container_rid     TEXT NOT NULL,
+        source_id         INTEGER,
+        resource_rid      TEXT,
+        path              TEXT NOT NULL,
+        name              TEXT NOT NULL,
+        size              INTEGER DEFAULT 0,
+        hash              TEXT,
+        modified_time     INTEGER,
+        status            TEXT DEFAULT 'indexed',
+        force_ignore      INTEGER DEFAULT 0,
         source_deleted_at DATETIME,
-        created_at DATETIME DEFAULT (datetime('now')),
-        updated_at DATETIME DEFAULT (datetime('now')),
-        metadata TEXT DEFAULT '{}',
+        created_at        DATETIME DEFAULT (datetime('now')),
+        updated_at        DATETIME DEFAULT (datetime('now')),
+        metadata          TEXT DEFAULT '{}',
         FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
         FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE SET NULL,
         FOREIGN KEY (source_id) REFERENCES resource_sources(id) ON DELETE SET NULL
       )
     `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_container_members_container ON container_members(container_rid)`);
+    await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_container_members_path ON container_members(container_rid, source_id, path)`);
 
-    // 迁移：为旧数据库增加 status 列
-    await this._migrateContainerMembersV1();
+    // ======================== 容器同步配置 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS container_sync_configs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        container_rid   TEXT NOT NULL,
+        source_id       INTEGER NOT NULL,
+        sync_mode       TEXT DEFAULT 'manual',
+        delete_policy   TEXT DEFAULT 'soft',
+        conflict_policy TEXT DEFAULT 'local',
+        interval_ms     INTEGER,
+        created_at      DATETIME DEFAULT (datetime('now')),
+        updated_at      DATETIME DEFAULT (datetime('now')),
+        FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
+        FOREIGN KEY (source_id) REFERENCES resource_sources(id) ON DELETE CASCADE
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_configs_container ON container_sync_configs(container_rid)`);
+    await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_configs_pair ON container_sync_configs(container_rid, source_id)`);
 
-    // 迁移：为旧数据库增加 force_ignore 列
-    await this._migrateContainerMembersV2();
-
-    // 迁移：增加 source_id，将 ignored 成员转为 force_ignore
-    await this._migrateContainerMembersV3();
-
-    // 迁移：增加 FOREIGN KEY 和 UNIQUE 约束
-    await this._migrateContainerMembersV4();
-
-    // 迁移：增加 source_deleted_at 列
-    await this._migrateContainerMembersV5();
+    // ======================== 容器操作 / 事务 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS container_operations (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_id        TEXT UNIQUE NOT NULL,
+        container_rid       TEXT NOT NULL,
+        type                TEXT NOT NULL,
+        member_id           INTEGER,
+        member_path         TEXT,
+        source_id           INTEGER,
+        before              TEXT,
+        after               TEXT,
+        created             INTEGER NOT NULL,
+        status              TEXT DEFAULT 'success',
+        parent_operation_id TEXT,
+        error               TEXT,
+        actor               TEXT,
+        transaction_id      TEXT,
+        FOREIGN KEY(container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
+        FOREIGN KEY(member_id) REFERENCES container_members(id) ON DELETE SET NULL
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_container ON container_operations(container_rid)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_type ON container_operations(type)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_member ON container_operations(member_id)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_parent ON container_operations(parent_operation_id)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_status ON container_operations(status)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_transaction ON container_operations(transaction_id)`);
 
     await this.run(`
-      CREATE INDEX IF NOT EXISTS idx_container_members_container ON container_members(container_rid)
+      CREATE TABLE IF NOT EXISTS container_transactions (
+        transaction_id  TEXT PRIMARY KEY,
+        container_rid   TEXT NOT NULL,
+        type            TEXT NOT NULL,
+        description     TEXT,
+        status          TEXT NOT NULL DEFAULT 'pending',
+        created         INTEGER,
+        completed       INTEGER,
+        error           TEXT,
+        FOREIGN KEY(container_rid) REFERENCES resources(rid) ON DELETE CASCADE
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_tx_container ON container_transactions(container_rid)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_tx_status ON container_transactions(status)`);
+
+    // ======================== AI 建议 / 记忆 / 概念 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS ai_suggestions (
+        id          TEXT PRIMARY KEY,
+        type        TEXT NOT NULL DEFAULT 'relation',
+        source_rid  TEXT,
+        target_rid  TEXT,
+        payload     TEXT DEFAULT '{}',
+        confidence  REAL DEFAULT 0,
+        reason      TEXT,
+        status      TEXT NOT NULL DEFAULT 'pending',
+        created     INTEGER,
+        updated     INTEGER,
+        priority    TEXT DEFAULT 'medium',
+        source      TEXT DEFAULT 'ai',
+        expires     INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_ai_suggestions_status ON ai_suggestions(status)`);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS ai_memory (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        type          TEXT,
+        resource_rid  TEXT,
+        concept       TEXT,
+        value         TEXT,
+        confidence    REAL DEFAULT 0.5,
+        tags          TEXT,
+        created_at    INTEGER
+      )
     `);
 
     await this.run(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_container_members_path ON container_members(container_rid, source_id, path)
+      CREATE TABLE IF NOT EXISTS ai_concepts (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT UNIQUE,
+        meaning     TEXT,
+        confidence  REAL DEFAULT 0.5,
+        metadata    TEXT,
+        relations   TEXT DEFAULT '[]',
+        created_at  INTEGER
+      )
     `);
 
-    // container_sync_configs 表（Phase 3.5）
-    await this._createSyncConfigsTable();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS ai_interactions (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        request   TEXT,
+        response  TEXT,
+        actions   TEXT,
+        created_at INTEGER
+      )
+    `);
 
-    // Phase 4.2: container_operations 表
-    await this._migrateContainerOperationsV6();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS ai_learning (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        pattern     TEXT,
+        feedback    TEXT,
+        adjustment  TEXT,
+        created_at  INTEGER
+      )
+    `);
 
-    // V7: container_operations 扩展字段
-    await this._migrateContainerOperationsV7();
+    // ======================== 知识事件 / 快照 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS knowledge_events (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        type    TEXT NOT NULL,
+        rid     TEXT,
+        payload TEXT DEFAULT '{}',
+        created INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_events_type ON knowledge_events(type)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_events_rid ON knowledge_events(rid)`);
 
-    // V8: container_transactions + transaction_id
-    await this._migrateContainerTransactionsV8();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS knowledge_snapshots (
+        id              TEXT PRIMARY KEY,
+        created_at      INTEGER,
+        resource_count  INTEGER DEFAULT 0,
+        relation_count  INTEGER DEFAULT 0,
+        density         REAL DEFAULT 0,
+        entropy         REAL DEFAULT 0,
+        growth          REAL DEFAULT 0
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_snapshots_created ON knowledge_snapshots(created_at)`);
 
-    // V9: relations 表升级（Phase 5.1）
-    await this._migrateRelationsV9();
+    // ======================== 分布式 / 同步记录 / 冲突 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS repositories (
+        id        TEXT PRIMARY KEY,
+        namespace TEXT NOT NULL UNIQUE,
+        name      TEXT NOT NULL,
+        path      TEXT NOT NULL,
+        created   INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_repositories_namespace ON repositories(namespace)`);
 
-    // V10: ai_suggestions + ai_memory 表（Phase 5.8）
-    await this._migrateAIV10();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS remote_resources (
+        global_id TEXT PRIMARY KEY,
+        namespace TEXT,
+        metadata  TEXT DEFAULT '{}',
+        hash      TEXT,
+        updated   INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_remote_resources_ns ON remote_resources(namespace)`);
 
-    // V11: knowledge_events + ai_suggestions 扩展（Phase 5.9）
-    await this._migrateAutomationV11();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS sync_records (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        repository  TEXT NOT NULL,
+        type        TEXT NOT NULL,
+        status      TEXT DEFAULT 'success',
+        changes     INTEGER DEFAULT 0,
+        details     TEXT DEFAULT '{}',
+        created     INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_records_repo ON sync_records(repository)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_records_type ON sync_records(type)`);
 
-    // V12: 分布式知识图谱（Phase 5.10）
-    await this._migrateDistributedV12();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS conflicts (
+        id        TEXT PRIMARY KEY,
+        resource  TEXT NOT NULL,
+        type      TEXT DEFAULT 'content_conflict',
+        status    TEXT DEFAULT 'pending',
+        payload   TEXT DEFAULT '{}',
+        created   INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_resource ON conflicts(resource)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts(status)`);
 
-    // V13: knowledge_snapshots（Phase 5.11）
-    await this._migrateEvolutionV13();
+    // ======================== 插件 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS plugins (
+        id            TEXT PRIMARY KEY,
+        name          TEXT,
+        version       TEXT,
+        enabled       INTEGER DEFAULT 1,
+        installed_at  INTEGER,
+        updated_at    INTEGER
+      )
+    `);
 
-    // V14: plugin system（Phase 6.1）
-    await this._migratePluginV14();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS plugin_settings (
+        plugin_id TEXT,
+        key       TEXT,
+        value     TEXT,
+        PRIMARY KEY (plugin_id, key)
+      )
+    `);
 
-    // V15: events（Phase 6.2）
-    await this._migrateEventV15();
+    // ======================== 事件 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS events (
+        id          TEXT PRIMARY KEY,
+        type        TEXT NOT NULL,
+        source      TEXT DEFAULT 'system',
+        payload     TEXT DEFAULT '{}',
+        metadata    TEXT DEFAULT '{}',
+        created_at  INTEGER NOT NULL
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)`);
 
-    // V16: workflow engine（Phase 6.3）
-    await this._migrateWorkflowV16();
+    // ======================== 工作流 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS workflows (
+        id          TEXT PRIMARY KEY,
+        name        TEXT,
+        definition  TEXT,
+        status      TEXT DEFAULT 'active',
+        created_at  INTEGER
+      )
+    `);
 
-    // V17: permission system（Phase 6.4）
-    await this._migratePermissionV17();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS workflow_executions (
+        id          TEXT PRIMARY KEY,
+        workflow_id TEXT,
+        status      TEXT,
+        context     TEXT,
+        created_at  INTEGER,
+        updated_at  INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_wfexec_workflow ON workflow_executions(workflow_id)`);
 
-    // V18: agent system（Phase 6.5）
-    await this._migrateAgentV18();
+    // ======================== 权限 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS roles (
+        id          TEXT PRIMARY KEY,
+        name        TEXT,
+        description TEXT DEFAULT ''
+      )
+    `);
 
-    // V19: multi-agent collaboration（Phase 6.6）
-    await this._migrateCollabV19();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS role_permissions (
+        role_id     TEXT NOT NULL,
+        permission  TEXT NOT NULL,
+        PRIMARY KEY (role_id, permission),
+        FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_rp_role ON role_permissions(role_id)`);
 
-    // V20: AI Native Knowledge OS（Phase 6.7）
-    await this._migrateAIV20();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS subjects_roles (
+        subject_id  TEXT NOT NULL,
+        role_id     TEXT NOT NULL,
+        PRIMARY KEY (subject_id, role_id)
+      )
+    `);
 
-    // V21: Knowledge OS Self-Evolution（Phase 6.8）
-    await this._migrateEvolutionV21();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS permissions (
+        id          TEXT PRIMARY KEY,
+        subject_id  TEXT NOT NULL,
+        action      TEXT NOT NULL
+      )
+    `);
 
-    // V22: Phase 6.9 Permission & Security System
-    await this._migrateSecurityV22();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS resource_acl (
+        resource_id  TEXT NOT NULL,
+        subject_id   TEXT NOT NULL,
+        permission   TEXT NOT NULL,
+        deny         INTEGER DEFAULT 0,
+        PRIMARY KEY (resource_id, subject_id, permission)
+      )
+    `);
 
-    // V23: Phase 6.10 Knowledge Runtime
-    await this._migrateRuntimeV23();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS permission_audit (
+        id          TEXT PRIMARY KEY,
+        subject     TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        resource    TEXT DEFAULT '',
+        allowed     INTEGER DEFAULT 1,
+        reason      TEXT DEFAULT '',
+        created_at  INTEGER NOT NULL
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_subject ON permission_audit(subject)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_created ON permission_audit(created_at)`);
 
-    // V24: Normalize embedded arrays into dedicated tables
-    await this._migrateNormalizeV24();
+    // ======================== 安全 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS identities (
+        id          TEXT PRIMARY KEY,
+        type        TEXT NOT NULL,
+        name        TEXT,
+        provider    TEXT DEFAULT 'local',
+        metadata    TEXT DEFAULT '{}',
+        created_at  INTEGER
+      )
+    `);
 
-    // V25: staging → DB, AI/evolution memory → existing tables, shared_memory
-    await this._migrateNormalizeV25();
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS policies (
+        id              TEXT PRIMARY KEY,
+        subject         TEXT NOT NULL,
+        resource        TEXT NOT NULL,
+        effect          TEXT NOT NULL DEFAULT 'allow',
+        priority        INTEGER DEFAULT 0,
+        condition_JSON  TEXT,
+        metadata        TEXT DEFAULT '{}',
+        created_at      INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS policy_actions (
+        policy_id  TEXT NOT NULL,
+        action     TEXT NOT NULL,
+        PRIMARY KEY (policy_id, action),
+        FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_pa_policy ON policy_actions(policy_id)`);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS security_audit (
+        id          TEXT PRIMARY KEY,
+        actor       TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        resource    TEXT DEFAULT '',
+        result      TEXT DEFAULT '',
+        reason      TEXT DEFAULT '',
+        metadata    TEXT DEFAULT '{}',
+        created_at  INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_actor ON security_audit(actor)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_result ON security_audit(result)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_created ON security_audit(created_at)`);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS credentials (
+        id            TEXT PRIMARY KEY,
+        identity_id   TEXT NOT NULL,
+        type          TEXT NOT NULL DEFAULT 'api-key',
+        token_hash    TEXT,
+        expires_at    INTEGER,
+        created_at    INTEGER,
+        metadata      TEXT DEFAULT '{}'
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_cred_identity ON credentials(identity_id)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_cred_hash ON credentials(token_hash)`);
+
+    // ======================== Agent ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS agents (
+        id          TEXT PRIMARY KEY,
+        name        TEXT,
+        type        TEXT,
+        status      TEXT DEFAULT 'created',
+        config      TEXT,
+        created_at  INTEGER,
+        updated_at  INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id          TEXT PRIMARY KEY,
+        agent_id    TEXT,
+        status      TEXT,
+        input       TEXT,
+        output      TEXT,
+        created_at  INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS agent_memory (
+        id          TEXT PRIMARY KEY,
+        agent_id    TEXT,
+        type        TEXT,
+        content     TEXT,
+        created_at  INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_agmem_agent ON agent_memory(agent_id)`);
+
+    // ======================== 协作 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id          TEXT PRIMARY KEY,
+        from_agent  TEXT,
+        to_agent    TEXT,
+        type        TEXT,
+        payload     TEXT,
+        created_at  INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS agent_teams (
+        id        TEXT PRIMARY KEY,
+        name      TEXT,
+        strategy  TEXT
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        id      TEXT PRIMARY KEY,
+        team_id TEXT,
+        goal    TEXT,
+        status  TEXT,
+        result  TEXT
+      )
+    `);
+
+    // ======================== 共享记忆 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS shared_memory (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id    TEXT UNIQUE NOT NULL,
+        scope       TEXT NOT NULL,
+        type        TEXT NOT NULL,
+        content     TEXT,
+        owner       TEXT DEFAULT 'system',
+        visibility  TEXT DEFAULT 'all',
+        created_at  INTEGER NOT NULL
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_shared_scope_type ON shared_memory(scope, type)`);
+
+    // ======================== 进化 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS evolution_states (
+        id          TEXT PRIMARY KEY,
+        version     TEXT,
+        health      REAL,
+        complexity  REAL,
+        connectivity REAL,
+        maturity    TEXT,
+        snapshot    TEXT,
+        score       INTEGER,
+        created_at  INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS evolution_actions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        type        TEXT,
+        strategy    TEXT,
+        action      TEXT,
+        status      TEXT,
+        result      TEXT,
+        created_at  INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS evolution_history (
+        id            TEXT PRIMARY KEY,
+        before_state  TEXT,
+        after_state   TEXT,
+        action        TEXT,
+        improvement   REAL,
+        result        TEXT,
+        created_at    INTEGER
+      )
+    `);
+
+    // ======================== 运行时 ========================
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS runtime_instances (
+        id          TEXT PRIMARY KEY,
+        type        TEXT,
+        state       TEXT,
+        updated_at  INTEGER,
+        created_at  INTEGER
+      )
+    `);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS runtime_events (
+        id          TEXT PRIMARY KEY,
+        runtime_id  TEXT,
+        event       TEXT,
+        payload     TEXT DEFAULT '{}',
+        created_at  INTEGER
+      )
+    `);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_rte_runtime ON runtime_events(runtime_id)`);
+    await this.run(`CREATE INDEX IF NOT EXISTS idx_rte_created ON runtime_events(created_at)`);
+
+    await this.run(`
+      CREATE TABLE IF NOT EXISTS runtime_state (
+        key         TEXT PRIMARY KEY,
+        value       TEXT,
+        updated_at  INTEGER
+      )
+    `);
+
+    // ======================== 系统种子数据 ========================
+    await this.run(
+      `INSERT OR IGNORE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated)
+       VALUES ('__system__', '__system__', 0, 'system', '', '', '{}', 0, ?, ?)`,
+      [Date.now(), Date.now()]
+    );
   }
 
   run(sql, params = []) {
@@ -386,1328 +809,6 @@ class Database {
       }
     });
   }
-
-  /**
-   * V23: Phase 6.10 Knowledge Runtime
-   *   runtime_instances — Runtime 实例
-   *   runtime_events    — Runtime 事件
-   *   runtime_state     — 全局状态
-   */
-  async _migrateRuntimeV23() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS runtime_instances (
-          id TEXT PRIMARY KEY,
-          type TEXT,
-          state TEXT,
-          updated_at INTEGER,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS runtime_events (
-          id TEXT PRIMARY KEY,
-          runtime_id TEXT,
-          event TEXT,
-          payload TEXT DEFAULT '{}',
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_rte_runtime ON runtime_events(runtime_id)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_rte_created ON runtime_events(created_at)`);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS runtime_state (
-          key TEXT PRIMARY KEY,
-          value TEXT,
-          updated_at INTEGER
-        )
-      `);
-
-      console.log('[migrate] Runtime V23 ok');
-    } catch (e) {
-      console.error('[migrate] Runtime V23 失败:', e.message);
-    }
-  }
-
-  /**
-   * 迁移 container_members 表：增加 status、created_at、updated_at 列
-   * 并为已有数据设置正确的 status 值
-   */
-  async _migrateContainerMembersV1() {
-    try {
-      // 检查 status 列是否存在
-      const colCheck = await this.get(
-        `PRAGMA table_info(container_members)`
-      );
-      // PRAGMA table_info 会返回多行，需要用 all
-      const columns = await this.all(`PRAGMA table_info(container_members)`);
-      const hasStatus = columns.some(c => c.name === 'status');
-
-      if (!hasStatus) {
-        console.log('[migrate] 为 container_members 增加 status/created_at/updated_at 列...');
-        await this.run(`ALTER TABLE container_members ADD COLUMN status TEXT DEFAULT 'indexed'`);
-        await this.run(`ALTER TABLE container_members ADD COLUMN created_at DATETIME DEFAULT (datetime('now'))`);
-        await this.run(`ALTER TABLE container_members ADD COLUMN updated_at DATETIME DEFAULT (datetime('now'))`);
-
-        // 已有 resource_rid 的 → promoted
-        await this.run(
-          `UPDATE container_members SET status = 'promoted' WHERE resource_rid IS NOT NULL`
-        );
-        console.log('[migrate] container_members 迁移完成');
-      }
-    } catch (e) {
-      // 列已存在时 ALTER TABLE 会报错，忽略
-      if (!e.message.includes('duplicate column')) {
-        console.error('[migrate] container_members 迁移失败:', e.message);
-      }
-    }
-  }
-
-  /**
-   * 迁移 resource_sources 表：增加 enabled/sync_mode/last_scan_at/created_at/updated_at 列
-   */
-  async _migrateResourceSourcesV1() {
-    try {
-      const columns = await this.all(`PRAGMA table_info(resource_sources)`);
-      const hasEnabled = columns.some(c => c.name === 'enabled');
-
-      if (!hasEnabled) {
-        console.log('[migrate] 为 resource_sources 增加 enabled/sync_mode/last_scan_at/created_at/updated_at 列...');
-        await this.run(`ALTER TABLE resource_sources ADD COLUMN enabled INTEGER DEFAULT 1`);
-        await this.run(`ALTER TABLE resource_sources ADD COLUMN sync_mode TEXT DEFAULT 'manual'`);
-        await this.run(`ALTER TABLE resource_sources ADD COLUMN last_scan_at INTEGER`);
-        await this.run(`ALTER TABLE resource_sources ADD COLUMN created_at INTEGER`);
-        await this.run(`ALTER TABLE resource_sources ADD COLUMN updated_at INTEGER`);
-        console.log('[migrate] resource_sources 迁移完成');
-      }
-    } catch (e) {
-      if (!e.message.includes('duplicate column')) {
-        console.error('[migrate] resource_sources 迁移失败:', e.message);
-      }
-    }
-  }
-
-  /**
-   * 迁移 container_members 表：增加 force_ignore 列
-   */
-  async _migrateContainerMembersV2() {
-    try {
-      const columns = await this.all(`PRAGMA table_info(container_members)`);
-      const hasForce = columns.some(c => c.name === 'force_ignore');
-
-      if (!hasForce) {
-        console.log('[migrate] 为 container_members 增加 force_ignore 列...');
-        await this.run(`ALTER TABLE container_members ADD COLUMN force_ignore INTEGER DEFAULT 0`);
-        console.log('[migrate] container_members V2 迁移完成');
-      }
-    } catch (e) {
-      if (!e.message.includes('duplicate column')) {
-        console.error('[migrate] container_members V2 迁移失败:', e.message);
-      }
-    }
-  }
-
-  /**
-   * 迁移 container_members 表 V3：
-   *   - 增加 source_id 列
-   *   - 将 status='ignored' 迁移为 status='indexed' + force_ignore=1
-   */
-  async _migrateContainerMembersV3() {
-    try {
-      const columns = await this.all(`PRAGMA table_info(container_members)`);
-      const hasSourceId = columns.some(c => c.name === 'source_id');
-
-      if (!hasSourceId) {
-        console.log('[migrate] container_members V3: 增加 source_id 列...');
-        await this.run(`ALTER TABLE container_members ADD COLUMN source_id INTEGER DEFAULT 0`);
-      }
-
-      // 无论 source_id 是否新增，都检查并迁移 ignored 状态
-      const ignoredCount = await this.get(
-        `SELECT COUNT(*) as cnt FROM container_members WHERE status = 'ignored'`
-      );
-      if (ignoredCount.cnt > 0) {
-        console.log(`[migrate] container_members V3: ${ignoredCount.cnt} 个 ignored 成员转为 indexed + force_ignore=1`);
-        await this.run(
-          `UPDATE container_members SET status = 'indexed', force_ignore = 1, updated_at = datetime('now') WHERE status = 'ignored'`
-        );
-      }
-
-      if (!hasSourceId) {
-        console.log('[migrate] container_members V3 迁移完成');
-      }
-    } catch (e) {
-      if (!e.message.includes('duplicate column')) {
-        console.error('[migrate] container_members V3 迁移失败:', e.message);
-      }
-    }
-  }
-
-  /**
-   * 创建 container_sync_configs 表（Phase 3.5 新增）
-   */
-  async _createSyncConfigsTable() {
-    const tables = await this.all(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='container_sync_configs'`
-    );
-    if (tables.length > 0) return;
-
-    console.log('[migrate] 创建 container_sync_configs 表...');
-    await this.run(`
-      CREATE TABLE container_sync_configs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        container_rid TEXT NOT NULL,
-        source_id INTEGER NOT NULL,
-        sync_mode TEXT DEFAULT 'manual',
-        delete_policy TEXT DEFAULT 'soft',
-        conflict_policy TEXT DEFAULT 'local',
-        interval_ms INTEGER,
-        created_at DATETIME DEFAULT (datetime('now')),
-        updated_at DATETIME DEFAULT (datetime('now')),
-        FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
-        FOREIGN KEY (source_id) REFERENCES resource_sources(id) ON DELETE CASCADE
-      )
-    `);
-    await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_configs_container ON container_sync_configs(container_rid)`);
-    await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_configs_pair ON container_sync_configs(container_rid, source_id)`);
-    console.log('[migrate] container_sync_configs 创建完成');
-  }
-
-  /**
-   * 迁移 container_members 表 V4：增加 FK(source_id) 和 UNIQUE(container_rid,source_id,path)
-   *
-   * SQLite 不支持 ALTER TABLE ADD CONSTRAINT，因此采用重建表的方式。
-   * 先清理孤儿数据，再通过 PRAGMA foreign_key_list 判断是否需要重建。
-   */
-  async _migrateContainerMembersV4() {
-    try {
-      // 1. 清理孤儿 + 存量 source_id=0 → NULL（0 不是合法 FK 引用）
-      const orphanCount = await this.get(
-        `SELECT COUNT(*) as cnt FROM container_members cm
-         WHERE cm.source_id != 0 AND cm.source_id IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM resource_sources rs WHERE rs.id = cm.source_id)`
-      );
-      if (orphanCount && orphanCount.cnt > 0) {
-        console.log(`[migrate] container_members V4: 清理 ${orphanCount.cnt} 个孤儿 source_id`);
-        await this.run('PRAGMA foreign_keys = OFF');
-        await this.run(
-          `UPDATE container_members SET source_id = NULL
-           WHERE source_id IS NOT NULL AND source_id != 0
-           AND NOT EXISTS (SELECT 1 FROM resource_sources rs WHERE rs.id = container_members.source_id)`
-        );
-        await this.run('PRAGMA foreign_keys = ON');
-      }
-
-      // 存量 source_id=0 → NULL（与 FK 对齐）
-      const zeroCount = await this.get(
-        `SELECT COUNT(*) as cnt FROM container_members WHERE source_id = 0`
-      );
-      if (zeroCount && zeroCount.cnt > 0) {
-        console.log(`[migrate] container_members V4: 将 ${zeroCount.cnt} 个 source_id=0 转为 NULL`);
-        await this.run('PRAGMA foreign_keys = OFF');
-        await this.run('UPDATE container_members SET source_id = NULL WHERE source_id = 0');
-        await this.run('PRAGMA foreign_keys = ON');
-      }
-
-      // 2. 检查是否需要重建表（通过检查 FK 是否存在）
-      const fkList = await this.all(`PRAGMA foreign_key_list(container_members)`);
-      const hasSourceFk = fkList.some(fk => fk.from === 'source_id');
-
-      if (!hasSourceFk) {
-        console.log('[migrate] container_members V4: 重建表以添加 source_id FK 和 UNIQUE 约束...');
-
-        // 开启外键支持
-        await this.run('PRAGMA foreign_keys = ON');
-
-        // 步骤：创建新表 → 复制数据 → 删旧表 → 重命名
-        await this.run('BEGIN TRANSACTION');
-
-        try {
-          await this.run(`
-            CREATE TABLE container_members_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              container_rid TEXT NOT NULL,
-              source_id INTEGER,
-              resource_rid TEXT,
-              path TEXT NOT NULL,
-              name TEXT NOT NULL,
-              size INTEGER DEFAULT 0,
-              hash TEXT,
-              modified_time INTEGER,
-              status TEXT DEFAULT 'indexed',
-              force_ignore INTEGER DEFAULT 0,
-              source_deleted_at DATETIME,
-              created_at DATETIME DEFAULT (datetime('now')),
-              updated_at DATETIME DEFAULT (datetime('now')),
-              metadata TEXT DEFAULT '{}',
-              FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
-              FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE SET NULL,
-              FOREIGN KEY (source_id) REFERENCES resource_sources(id) ON DELETE SET NULL
-            )
-          `);
-
-          await this.run(
-            `INSERT INTO container_members_new SELECT * FROM container_members`
-          );
-
-          await this.run(`DROP TABLE container_members`);
-          await this.run(`ALTER TABLE container_members_new RENAME TO container_members`);
-
-          await this.run(`CREATE INDEX IF NOT EXISTS idx_container_members_container ON container_members(container_rid)`);
-          await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_container_members_path ON container_members(container_rid, source_id, path)`);
-
-          await this.run('COMMIT');
-          console.log('[migrate] container_members V4 重建完成');
-        } catch (recreateError) {
-          await this.run('ROLLBACK');
-          throw recreateError;
-        }
-      } else {
-        // FK 已存在，只需确保 UNIQUE 索引包含 source_id
-        const indexList = await this.all(`PRAGMA index_list(container_members)`);
-        const hasPathIdx = indexList.some(idx => idx.name === 'idx_container_members_path');
-        if (hasPathIdx) {
-          // 检查索引是否已包含 source_id
-          const idxInfo = await this.all(`PRAGMA index_info(idx_container_members_path)`);
-          const hasSourceInIdx = idxInfo.some(col => col.name === 'source_id');
-          if (!hasSourceInIdx) {
-            // 重建唯一索引
-            await this.run(`DROP INDEX IF EXISTS idx_container_members_path`);
-            await this.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_container_members_path ON container_members(container_rid, source_id, path)`);
-            console.log('[migrate] container_members V4: 唯一索引已更新为包含 source_id');
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[migrate] container_members V4 迁移失败:', e.message);
-    }
-  }
-
-  /**
-   * 迁移 container_members 表 V5：增加 source_deleted_at 列
-   */
-  async _migrateContainerMembersV5() {
-    try {
-      const columns = await this.all(`PRAGMA table_info(container_members)`);
-      const hasCol = columns.some(c => c.name === 'source_deleted_at');
-
-      if (!hasCol) {
-        console.log('[migrate] container_members V5: 增加 source_deleted_at 列...');
-        await this.run(`ALTER TABLE container_members ADD COLUMN source_deleted_at DATETIME`);
-        console.log('[migrate] container_members V5 迁移完成');
-      }
-    } catch (e) {
-      if (!e.message.includes('duplicate column')) {
-        console.error('[migrate] container_members V5 迁移失败:', e.message);
-      }
-    }
-  }
-
-  /**
-   * V6: 创建 container_operations 表（Operation 历史系统）
-   */
-  async _migrateContainerOperationsV6() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS container_operations (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          operation_id TEXT UNIQUE NOT NULL,
-          container_rid TEXT NOT NULL,
-          type TEXT NOT NULL,
-          member_id INTEGER,
-          member_path TEXT,
-          source_id INTEGER,
-          before TEXT,
-          after TEXT,
-          created INTEGER NOT NULL,
-          FOREIGN KEY(container_rid) REFERENCES resources(rid) ON DELETE CASCADE,
-          FOREIGN KEY(member_id) REFERENCES container_members(id) ON DELETE SET NULL
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_container ON container_operations(container_rid)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_type ON container_operations(type)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_member ON container_operations(member_id)`);
-    } catch (e) {
-      console.error('[migrate] container_operations V6 创建失败:', e.message);
-    }
-  }
-
-  /**
-   * V7: container_operations 扩展字段（status / parent_operation_id / error / actor）
-   */
-  async _migrateContainerOperationsV7() {
-    try {
-      // 逐列尝试 ALTER，忽略已存在的列
-      const cols = [
-        ["status", "TEXT DEFAULT 'success'"],
-        ["parent_operation_id", "TEXT"],
-        ["error", "TEXT"],
-        ["actor", "TEXT"]
-      ];
-      for (const [col, def] of cols) {
-        try {
-          await this.run(`ALTER TABLE container_operations ADD COLUMN ${col} ${def}`);
-        } catch (e) {
-          // 列已存在，跳过
-        }
-      }
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_parent ON container_operations(parent_operation_id)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_status ON container_operations(status)`);
-    } catch (e) {
-      console.error('[migrate] container_operations V7 失败:', e.message);
-    }
-  }
-
-  /**
-   * V8: container_transactions 表 + transaction_id 列
-   */
-  async _migrateContainerTransactionsV8() {
-    try {
-      // 创建 container_transactions 表
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS container_transactions (
-          transaction_id TEXT PRIMARY KEY,
-          container_rid TEXT NOT NULL,
-          type TEXT NOT NULL,
-          description TEXT,
-          status TEXT NOT NULL DEFAULT 'pending',
-          created INTEGER,
-          completed INTEGER,
-          error TEXT,
-          FOREIGN KEY(container_rid) REFERENCES resources(rid) ON DELETE CASCADE
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_tx_container ON container_transactions(container_rid)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_tx_status ON container_transactions(status)`);
-
-      // 为 container_operations 增加 transaction_id 列
-      try {
-        await this.run(`ALTER TABLE container_operations ADD COLUMN transaction_id TEXT`);
-      } catch (e) { /* 列已存在 */ }
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_ops_transaction ON container_operations(transaction_id)`);
-    } catch (e) {
-      console.error('[migrate] container_transactions V8 失败:', e.message);
-    }
-  }
-
-  /**
-   * V9: relations 表升级 — 增加 metadata、updated、deleted 字段 + 索引
-   * Phase 5.1
-   */
-  async _migrateRelationsV9() {
-    try {
-      // 新增字段（ALTER TABLE ADD COLUMN，已存在则忽略）
-      for (const col of [
-        { name: 'metadata', def: "TEXT DEFAULT '{}'" },
-        { name: 'updated', def: 'INTEGER' },
-        { name: 'deleted', def: 'INTEGER DEFAULT 0' }
-      ]) {
-        try {
-          await this.run(`ALTER TABLE relations ADD COLUMN ${col.name} ${col.def}`);
-        } catch (e) { /* 列已存在 */ }
-      }
-
-      // 索引
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_relations_deleted ON relations(deleted)`);
-
-      // Phase 5.2: 确保 __system__ 资源存在（用于 relation 等非容器操作）
-      await this.run(
-        `INSERT OR IGNORE INTO resources (rid, name, layer, type, path, hash, metadata, encrypted, created, updated)
-         VALUES ('__system__', '__system__', 0, 'system', '', '', '{}', 0, ?, ?)`,
-        [Date.now(), Date.now()]
-      );
-    } catch (e) {
-      console.error('[migrate] relations V9 失败:', e.message);
-    }
-  }
-
-  /**
-   * V10: AI 辅助表（Phase 5.8）
-   *   ai_suggestions — AI 建议队列
-   *   ai_memory      — AI 分析缓存
-   */
-  async _migrateAIV10() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_suggestions (
-          id TEXT PRIMARY KEY,
-          type TEXT NOT NULL DEFAULT 'relation',
-          source_rid TEXT,
-          target_rid TEXT,
-          payload TEXT DEFAULT '{}',
-          confidence REAL DEFAULT 0,
-          reason TEXT,
-          status TEXT NOT NULL DEFAULT 'pending',
-          created INTEGER,
-          updated INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE INDEX IF NOT EXISTS idx_ai_suggestions_status ON ai_suggestions(status)
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_memory (
-          id TEXT PRIMARY KEY,
-          rid TEXT,
-          type TEXT NOT NULL,
-          content TEXT DEFAULT '{}',
-          created INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE INDEX IF NOT EXISTS idx_ai_memory_rid ON ai_memory(rid)
-      `);
-    } catch (e) {
-      console.error('[migrate] AI V10 失败:', e.message);
-    }
-  }
-
-  /**
-   * V11: Phase 5.9 Knowledge OS Automation
-   *   knowledge_events — 自动化事件记录
-   *   ai_suggestions 扩展 — priority / source / expires
-   */
-  async _migrateAutomationV11() {
-    try {
-      // knowledge_events 表
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS knowledge_events (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT NOT NULL,
-          rid TEXT,
-          payload TEXT DEFAULT '{}',
-          created INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_events_type ON knowledge_events(type)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_events_rid ON knowledge_events(rid)`);
-
-      // ai_suggestions 扩展列
-      for (const col of [
-        { name: 'priority', def: "TEXT DEFAULT 'medium'" },
-        { name: 'source', def: "TEXT DEFAULT 'ai'" },
-        { name: 'expires', def: 'INTEGER' }
-      ]) {
-        try {
-          await this.run(`ALTER TABLE ai_suggestions ADD COLUMN ${col.name} ${col.def}`);
-        } catch (e) { /* 列已存在 */ }
-      }
-    } catch (e) {
-      console.error('[migrate] Automation V11 失败:', e.message);
-    }
-  }
-
-  /**
-   * V12: Phase 5.10 Distributed Knowledge Graph
-   *   repositories      — 联邦仓库注册
-   *   remote_resources  — 远程资源元数据
-   *   sync_records      — 同步操作记录
-   *   conflicts         — 同步冲突
-   */
-  async _migrateDistributedV12() {
-    try {
-      // repositories
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS repositories (
-          id TEXT PRIMARY KEY,
-          namespace TEXT NOT NULL UNIQUE,
-          name TEXT NOT NULL,
-          path TEXT NOT NULL,
-          created INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_repositories_namespace ON repositories(namespace)`);
-
-      // remote_resources
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS remote_resources (
-          global_id TEXT PRIMARY KEY,
-          namespace TEXT,
-          metadata TEXT DEFAULT '{}',
-          hash TEXT,
-          updated INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_remote_resources_ns ON remote_resources(namespace)`);
-
-      // sync_records
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS sync_records (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          repository TEXT NOT NULL,
-          type TEXT NOT NULL,
-          status TEXT DEFAULT 'success',
-          changes INTEGER DEFAULT 0,
-          details TEXT DEFAULT '{}',
-          created INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_records_repo ON sync_records(repository)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_records_type ON sync_records(type)`);
-
-      // conflicts
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS conflicts (
-          id TEXT PRIMARY KEY,
-          resource TEXT NOT NULL,
-          type TEXT DEFAULT 'content_conflict',
-          status TEXT DEFAULT 'pending',
-          payload TEXT DEFAULT '{}',
-          created INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_resource ON conflicts(resource)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts(status)`);
-    } catch (e) {
-      console.error('[migrate] Distributed V12 失败:', e.message);
-    }
-  }
-
-  /**
-   * V13: Phase 5.11 Knowledge Evolution
-   *   knowledge_snapshots — 知识状态快照
-   */
-  async _migrateEvolutionV13() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS knowledge_snapshots (
-          id TEXT PRIMARY KEY,
-          created_at INTEGER,
-          resource_count INTEGER DEFAULT 0,
-          relation_count INTEGER DEFAULT 0,
-          density REAL DEFAULT 0,
-          entropy REAL DEFAULT 0,
-          growth REAL DEFAULT 0
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_snapshots_created ON knowledge_snapshots(created_at)`);
-    } catch (e) {
-      console.error('[migrate] Evolution V13 失败:', e.message);
-    }
-  }
-
-  /**
-   * V14: Phase 6.1 Plugin System
-   *   plugins         — 插件注册记录
-   *   plugin_settings — 插件独立配置
-   */
-  async _migratePluginV14() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS plugins (
-          id TEXT PRIMARY KEY,
-          name TEXT,
-          version TEXT,
-          enabled INTEGER DEFAULT 1,
-          installed_at INTEGER,
-          updated_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS plugin_settings (
-          plugin_id TEXT,
-          key TEXT,
-          value TEXT,
-          PRIMARY KEY (plugin_id, key)
-        )
-      `);
-    } catch (e) {
-      console.error('[migrate] Plugin V14 失败:', e.message);
-    }
-  }
-
-  /**
-   * V15: Phase 6.2 Event System
-   *   events — 事件持久化表
-   */
-  async _migrateEventV15() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS events (
-          id TEXT PRIMARY KEY,
-          type TEXT NOT NULL,
-          source TEXT DEFAULT 'system',
-          payload TEXT DEFAULT '{}',
-          metadata TEXT DEFAULT '{}',
-          created_at INTEGER NOT NULL
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)`);
-    } catch (e) {
-      console.error('[migrate] Event V15 失败:', e.message);
-    }
-  }
-
-  /**
-   * V16: Phase 6.3 Workflow Engine
-   *   workflows           — 工作流定义
-   *   workflow_executions — 执行记录
-   */
-  async _migrateWorkflowV16() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS workflows (
-          id TEXT PRIMARY KEY,
-          name TEXT,
-          definition TEXT,
-          status TEXT DEFAULT 'active',
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS workflow_executions (
-          id TEXT PRIMARY KEY,
-          workflow_id TEXT,
-          status TEXT,
-          context TEXT,
-          created_at INTEGER,
-          updated_at INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_wfexec_workflow ON workflow_executions(workflow_id)`);
-    } catch (e) {
-      console.error('[migrate] Workflow V16 失败:', e.message);
-    }
-  }
-
-  /**
-   * V17: Phase 6.4 Permission System
-   *   roles            — 角色
-   *   subjects_roles   — 角色绑定
-   *   permissions      — 直接权限
-   *   resource_acl     — 资源 ACL
-   *   permission_audit — 审计日志
-   */
-  async _migratePermissionV17() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS roles (
-          id TEXT PRIMARY KEY,
-          name TEXT,
-          description TEXT DEFAULT '',
-          permissions TEXT DEFAULT '[]'
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS subjects_roles (
-          subject_id TEXT NOT NULL,
-          role_id TEXT NOT NULL,
-          PRIMARY KEY (subject_id, role_id)
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS permissions (
-          id TEXT PRIMARY KEY,
-          subject_id TEXT NOT NULL,
-          action TEXT NOT NULL
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS resource_acl (
-          resource_id TEXT NOT NULL,
-          subject_id TEXT NOT NULL,
-          permission TEXT NOT NULL,
-          deny INTEGER DEFAULT 0
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS permission_audit (
-          id TEXT PRIMARY KEY,
-          subject TEXT NOT NULL,
-          action TEXT NOT NULL,
-          resource TEXT DEFAULT '',
-          allowed INTEGER DEFAULT 1,
-          reason TEXT DEFAULT '',
-          created_at INTEGER NOT NULL
-        )
-      `);
-
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_subject ON permission_audit(subject)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_perm_audit_created ON permission_audit(created_at)`);
-    } catch (e) {
-      console.error('[migrate] Permission V17 失败:', e.message);
-    }
-  }
-
-  /**
-   * V18: Phase 6.5 Knowledge Agent System
-   *   agents        — Agent 定义
-   *   agent_runs    — 运行记录
-   *   agent_memory  — Agent 记忆
-   */
-  async _migrateAgentV18() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS agents (
-          id TEXT PRIMARY KEY,
-          name TEXT,
-          type TEXT,
-          status TEXT DEFAULT 'created',
-          config TEXT,
-          created_at INTEGER,
-          updated_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS agent_runs (
-          id TEXT PRIMARY KEY,
-          agent_id TEXT,
-          status TEXT,
-          input TEXT,
-          output TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS agent_memory (
-          id TEXT PRIMARY KEY,
-          agent_id TEXT,
-          type TEXT,
-          content TEXT,
-          created_at INTEGER
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_agmem_agent ON agent_memory(agent_id)`);
-    } catch (e) {
-      console.error('[migrate] Agent V18 失败:', e.message);
-    }
-  }
-
-  /**
-   * V19: Phase 6.6 Multi-Agent Collaboration
-   *   agent_messages — 消息
-   *   agent_teams    — 团队
-   *   agent_tasks    — 任务
-   */
-  async _migrateCollabV19() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS agent_messages (
-          id TEXT PRIMARY KEY,
-          from_agent TEXT,
-          to_agent TEXT,
-          type TEXT,
-          payload TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS agent_teams (
-          id TEXT PRIMARY KEY,
-          name TEXT,
-          strategy TEXT
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS agent_tasks (
-          id TEXT PRIMARY KEY,
-          team_id TEXT,
-          goal TEXT,
-          status TEXT,
-          result TEXT
-        )
-      `);
-    } catch (e) {
-      console.error('[migrate] Collab V19 失败:', e.message);
-    }
-  }
-
-  /**
-   * V20: Phase 6.7 AI Native Knowledge OS
-   *   ai_memory       — 语义记忆
-   *   ai_concepts     — 概念记忆
-   *   ai_interactions — AI 交互记录
-   *   ai_learning     — 学习记录
-   */
-  async _migrateAIV20() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_memory (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT,
-          concept TEXT,
-          value TEXT,
-          confidence REAL DEFAULT 0.5,
-          tags TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_concepts (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT UNIQUE,
-          meaning TEXT,
-          confidence REAL DEFAULT 0.5,
-          metadata TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_interactions (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          request TEXT,
-          response TEXT,
-          actions TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_learning (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          pattern TEXT,
-          feedback TEXT,
-          adjustment TEXT,
-          created_at INTEGER
-        )
-      `);
-    } catch (e) {
-      console.error('[migrate] AI V20 失败:', e.message);
-    }
-  }
-
-  /**
-   * V21: Phase 6.8 Knowledge OS Self-Evolution
-   *   evolution_states  — 进化状态快照
-   *   evolution_actions — 进化执行记录
-   *   evolution_history — 进化历史
-   */
-  async _migrateEvolutionV21() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS evolution_states (
-          id TEXT PRIMARY KEY,
-          version TEXT,
-          health REAL,
-          complexity REAL,
-          connectivity REAL,
-          maturity TEXT,
-          snapshot TEXT,
-          score INTEGER,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS evolution_actions (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT,
-          strategy TEXT,
-          action TEXT,
-          status TEXT,
-          result TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS evolution_history (
-          id TEXT PRIMARY KEY,
-          before_state TEXT,
-          after_state TEXT,
-          action TEXT,
-          improvement REAL,
-          result TEXT,
-          created_at INTEGER
-        )
-      `);
-    } catch (e) {
-      console.error('[migrate] Evolution V21 失败:', e.message);
-    }
-  }
-
-  /**
-   * V22: Phase 6.9 Permission & Security System
-   *   identities      — 多类型身份
-   *   policies        — 声明式安全策略
-   *   security_audit  — 安全审计日志
-   *   credentials     — 认证凭据
-   */
-  async _migrateSecurityV22() {
-    try {
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS identities (
-          id TEXT PRIMARY KEY,
-          type TEXT NOT NULL,
-          name TEXT,
-          provider TEXT DEFAULT 'local',
-          metadata TEXT DEFAULT '{}',
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS policies (
-          id TEXT PRIMARY KEY,
-          subject TEXT NOT NULL,
-          resource TEXT NOT NULL,
-          action TEXT NOT NULL,
-          effect TEXT NOT NULL DEFAULT 'allow',
-          priority INTEGER DEFAULT 0,
-          condition_JSON TEXT,
-          metadata TEXT DEFAULT '{}',
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS security_audit (
-          id TEXT PRIMARY KEY,
-          actor TEXT NOT NULL,
-          action TEXT NOT NULL,
-          resource TEXT DEFAULT '',
-          result TEXT DEFAULT '',
-          reason TEXT DEFAULT '',
-          metadata TEXT DEFAULT '{}',
-          created_at INTEGER
-        )
-      `);
-
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_actor ON security_audit(actor)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_result ON security_audit(result)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_sec_audit_created ON security_audit(created_at)`);
-
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS credentials (
-          id TEXT PRIMARY KEY,
-          identity_id TEXT NOT NULL,
-          type TEXT NOT NULL DEFAULT 'api-key',
-          token_hash TEXT,
-          expires_at INTEGER,
-          created_at INTEGER,
-          metadata TEXT DEFAULT '{}'
-        )
-      `);
-
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_cred_identity ON credentials(identity_id)`);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_cred_hash ON credentials(token_hash)`);
-
-      console.log('[migrate] Security V22 ok');
-    } catch (e) {
-      console.error('[migrate] Security V22 失败:', e.message);
-    }
-  }
-
-  /**
-   * V24: Normalize 5 embedded JSON arrays into dedicated tables.
-   *
-   *   1. resource_tags           — resources.metadata.tags
-   *   2. resource_capabilities    — resources.capabilities
-   *   3. container_ignore_patterns — resources.container_schema.ignored_patterns
-   *   4. role_permissions         — roles.permissions
-   *   5. policy_actions           — policies.action
-   *
-   * Existing JSON columns are preserved for backward compatibility.
-   * New reads should prefer the dedicated tables.
-   */
-  async _migrateNormalizeV24() {
-    try {
-      // 1. resource_tags
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS resource_tags (
-          resource_rid TEXT NOT NULL,
-          tag TEXT NOT NULL,
-          PRIMARY KEY (resource_rid, tag),
-          FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_rt_tag ON resource_tags(tag)`);
-
-      // Migrate data from metadata JSON
-      const resRows = await this.all(
-        `SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'`
-      );
-      for (const row of resRows) {
-        try {
-          const m = JSON.parse(row.metadata || '{}');
-          const tags = Array.isArray(m.tags) ? m.tags : [];
-          for (const t of tags) {
-            if (t && t.trim()) {
-              await this.run(
-                'INSERT OR IGNORE INTO resource_tags (resource_rid, tag) VALUES (?, ?)',
-                [row.rid, t.trim()]
-              );
-            }
-          }
-        } catch {}
-      }
-
-      // 2. resource_capabilities
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS resource_capabilities (
-          resource_rid TEXT NOT NULL,
-          capability TEXT NOT NULL,
-          PRIMARY KEY (resource_rid, capability),
-          FOREIGN KEY (resource_rid) REFERENCES resources(rid) ON DELETE CASCADE
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_rc_cap ON resource_capabilities(capability)`);
-
-      try {
-        const capRows = await this.all(
-          `SELECT rid, capabilities FROM resources WHERE deleted = 0 AND capabilities IS NOT NULL`
-        );
-        for (const row of capRows) {
-          try {
-            const caps = JSON.parse(row.capabilities || '[]');
-            for (const c of caps) {
-              if (c && c.trim()) {
-                await this.run(
-                  'INSERT OR IGNORE INTO resource_capabilities (resource_rid, capability) VALUES (?, ?)',
-                  [row.rid, c.trim()]
-                );
-              }
-            }
-          } catch {}
-        }
-      } catch (e) { /* capabilities 列可能不存在 */ }
-
-      // 3. container_ignore_patterns
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS container_ignore_patterns (
-          container_rid TEXT NOT NULL,
-          pattern TEXT NOT NULL,
-          PRIMARY KEY (container_rid, pattern),
-          FOREIGN KEY (container_rid) REFERENCES resources(rid) ON DELETE CASCADE
-        )
-      `);
-
-      try {
-        const schemaRows = await this.all(
-          `SELECT rid, container_schema FROM resources WHERE deleted = 0 AND container_schema IS NOT NULL`
-        );
-        for (const row of schemaRows) {
-          try {
-            const schema = JSON.parse(row.container_schema || '{}');
-            const patterns = schema.ignored_patterns || [];
-            for (const p of patterns) {
-              if (p && p.trim()) {
-                await this.run(
-                  'INSERT OR IGNORE INTO container_ignore_patterns (container_rid, pattern) VALUES (?, ?)',
-                  [row.rid, p.trim()]
-                );
-              }
-            }
-          } catch {}
-        }
-      } catch (e) { /* container_schema 列可能不存在 */ }
-
-      // 4. role_permissions
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS role_permissions (
-          role_id TEXT NOT NULL,
-          permission TEXT NOT NULL,
-          PRIMARY KEY (role_id, permission),
-          FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_rp_role ON role_permissions(role_id)`);
-
-      try {
-        const roleRows = await this.all(`SELECT id, permissions FROM roles`);
-        for (const row of roleRows) {
-          try {
-            const perms = JSON.parse(row.permissions || '[]');
-            for (const p of perms) {
-              if (p && p.trim()) {
-                await this.run(
-                  'INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)',
-                  [row.id, p.trim()]
-                );
-              }
-            }
-          } catch {}
-        }
-      } catch (e) { /* roles 表可能不存在 */ }
-
-      // 5. policy_actions
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS policy_actions (
-          policy_id TEXT NOT NULL,
-          action TEXT NOT NULL,
-          PRIMARY KEY (policy_id, action),
-          FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_pa_policy ON policy_actions(policy_id)`);
-
-      try {
-        const polRows = await this.all(`SELECT id, action FROM policies`);
-        for (const row of polRows) {
-          try {
-            const actions = JSON.parse(row.action || '[]');
-            for (const a of actions) {
-              if (a && a.trim()) {
-                await this.run(
-                  'INSERT OR IGNORE INTO policy_actions (policy_id, action) VALUES (?, ?)',
-                  [row.id, a.trim()]
-                );
-              }
-            }
-          } catch {}
-        }
-      } catch (e) { /* policies 表可能不存在 */ }
-
-      // --- 迁移完成后，清理旧 JSON 列 --- //
-
-      // 从 metadata JSON 中剥离 tags（tags 已迁入 resource_tags 表）
-      const allMeta = await this.all(
-        "SELECT rid, metadata FROM resources WHERE deleted = 0 AND type != 'system'"
-      );
-      for (const row of allMeta) {
-        try {
-          const m = JSON.parse(row.metadata || '{}');
-          if (m.tags !== undefined) {
-            const { tags: _, ...rest } = m;
-            await this.run('UPDATE resources SET metadata = ? WHERE rid = ?',
-              [JSON.stringify(rest), row.rid]);
-          }
-        } catch {}
-      }
-
-      // 删除 resources.capabilities 列
-      try { await this.run('ALTER TABLE resources DROP COLUMN capabilities'); } catch {}
-
-      // 从 container_schema JSON 中剥离 ignored_patterns（已迁入 container_ignore_patterns 表）
-      // container_schema 列保留（含 type / allowed_types / refresh_interval 等字段）
-      try {
-        const schemaRows = await this.all(
-          `SELECT rid, container_schema FROM resources WHERE deleted = 0 AND container_schema IS NOT NULL`
-        );
-        for (const row of schemaRows) {
-          try {
-            const s = JSON.parse(row.container_schema || '{}');
-            if (s.ignored_patterns !== undefined) {
-              const { ignored_patterns: _, ...rest } = s;
-              await this.run('UPDATE resources SET container_schema = ? WHERE rid = ?',
-                [JSON.stringify(rest), row.rid]);
-            }
-          } catch {}
-        }
-      } catch {}
-
-      // 删除 roles.permissions 列
-      try { await this.run('ALTER TABLE roles DROP COLUMN permissions'); } catch {}
-
-      // 删除 policies.action 列
-      try { await this.run('ALTER TABLE policies DROP COLUMN action'); } catch {}
-
-      console.log('[migrate] Normalize V24 ok');
-    } catch (e) {
-      console.error('[migrate] Normalize V24 失败:', e.message);
-    }
-  }
-
-  /**
-   * V25: 非独立实体进数据库
-   *   - staging_changes    — 暂存区（替代 staging.json）
-   *   - shared_memory      — Agent 协作共享记忆
-   *   - ai_memory 修复     — V10/V20 表结构冲突修复
-   */
-  async _migrateNormalizeV25() {
-    try {
-      // 1. 修复 ai_memory 表（V10 建了旧结构，V20 的 CREATE IF NOT EXISTS 被跳过）
-      const aiCols = await this.all("PRAGMA table_info(ai_memory)");
-      if (aiCols.length > 0 && aiCols.some(c => c.name === 'rid')) {
-        // V10 旧结构：有 rid 列 → 删除重建为 V20 结构
-        await this.run('DROP TABLE ai_memory');
-      }
-      // 统一用 V20 结构
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS ai_memory (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT,
-          concept TEXT,
-          value TEXT,
-          confidence REAL DEFAULT 0.5,
-          tags TEXT,
-          created_at INTEGER
-        )
-      `);
-
-      // 2. staging_changes 表
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS staging_changes (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT NOT NULL CHECK(type IN ('add','modify','delete','rename','metadata')),
-          path TEXT NOT NULL,
-          old_path TEXT,
-          rid TEXT,
-          meta_json TEXT,
-          created_at INTEGER NOT NULL
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_staging_type ON staging_changes(type)`);
-
-      // 3. shared_memory 表
-      await this.run(`
-        CREATE TABLE IF NOT EXISTS shared_memory (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          entry_id TEXT UNIQUE NOT NULL,
-          scope TEXT NOT NULL,
-          type TEXT NOT NULL,
-          content TEXT,
-          owner TEXT DEFAULT 'system',
-          visibility TEXT DEFAULT 'all',
-          created_at INTEGER NOT NULL
-        )
-      `);
-      await this.run(`CREATE INDEX IF NOT EXISTS idx_shared_scope_type ON shared_memory(scope, type)`);
-
-      // 4. ai_concepts 补充 relations 列（V20 漏了）
-      try { await this.run(`ALTER TABLE ai_concepts ADD COLUMN relations TEXT DEFAULT '[]'`); } catch {}
-
-      // 5. config.json 目录映射 → sync_config
-      await this._migrateConfigDirs();
-
-      console.log('[migrate] Normalize V25 ok');
-    } catch (e) {
-      throw new Error(`[migrate] Normalize V25 失败: ${e.message}`);
-    }
-  }
-
-  /**
-   * V25 辅助: config.json → sync_config
-   */
-  async _migrateConfigDirs() {
-    try {
-      const configPath = require('path').join(this.repoPath, '.note', 'config.json');
-      if (!require('fs-extra').existsSync(configPath)) return;
-
-      const config = require('fs-extra').readJsonSync(configPath);
-      const dirs = config.directories || {};
-      for (const [category, subdir] of Object.entries(dirs)) {
-        await this.run(
-          'INSERT OR REPLACE INTO sync_config (key, value) VALUES (?, ?)',
-          [`config.directories.${category}`, subdir]
-        );
-      }
-    } catch { /* config.json 不是关键路径，静默跳过 */ }
-  }
-
-  /**
-   * @private
-   */
-  async _noop() {}
 }
 
 module.exports = Database;
