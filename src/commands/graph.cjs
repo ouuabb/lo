@@ -4,6 +4,7 @@
  */
 
 const chalk = require('chalk');
+const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
 
@@ -1100,6 +1101,250 @@ async function knowledgeRepairHandler() {
   }
 }
 
+// ═══════════ Phase 5.10: Distributed Knowledge Graph Handlers ═══════════
+
+/**
+ * lo federation list
+ */
+async function federationListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const repos = await repo.listFederatedRepositories();
+
+    console.log(chalk.bold.cyan('\n  Federated Repositories'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (repos.length === 0) {
+      console.log(chalk.gray('  No federated repositories registered.'));
+      console.log(chalk.gray('  Use "lo federation add <path> --namespace <ns>" to register.'));
+    } else {
+      for (const r of repos) {
+        console.log(`  ${chalk.cyan(r.namespace)}  ${chalk.green(r.name)}`);
+        console.log(`    ${chalk.gray(r.path)}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`联邦列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo federation add <path> --namespace <ns>
+ */
+async function federationAddHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.registerFederatedRepository(
+      argv.name || path.basename(argv.path),
+      argv.namespace,
+      argv.path
+    );
+
+    console.log(chalk.green(`\n  Registered: ${result.namespace} → ${result.path}\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`联邦注册失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo federation remove <namespace>
+ */
+async function federationRemoveHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.removeFederatedRepository(argv.namespace);
+
+    console.log(chalk.green(`\n  Removed: ${result.removed}\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`联邦移除失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo sync pull <namespace>
+ */
+async function syncPullHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    console.log(chalk.bold.cyan(`\n  Pulling from ${argv.namespace}...\n`));
+
+    const result = await repo.syncPull(argv.namespace);
+
+    console.log(`  Imported:     ${chalk.green(result.status.imported)}`);
+    if (result.status.conflicts > 0) {
+      console.log(`  Conflicts:    ${chalk.red(result.status.conflicts)}`);
+    }
+    console.log('');
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`同步失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo sync push <namespace>
+ */
+async function syncPushHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    console.log(chalk.bold.cyan(`\n  Pushing to ${argv.namespace}...\n`));
+
+    const result = await repo.syncPush(argv.namespace);
+
+    console.log(`  Pushed:  ${chalk.green(result.pushed)} resources`);
+    console.log('');
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`同步失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo sync status
+ */
+async function syncStatusHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const status = await repo.getSyncStatus();
+
+    console.log(chalk.bold.cyan('\n  Sync Status'));
+    console.log(chalk.gray('  ───────────────────────────────'));
+    console.log(`  Resources:       ${chalk.green(status.resources)}`);
+    console.log(`  Remote:          ${chalk.cyan(status.remoteResources)}`);
+    console.log(`  Relations:       ${status.relations}`);
+    console.log(`  Conflicts:       ${status.conflicts > 0 ? chalk.red(status.conflicts) : chalk.green(0)}`);
+
+    if (status.lastSync) {
+      console.log(`  Last Sync:       ${chalk.gray(status.lastSync.type)} (${new Date(status.lastSync.created).toLocaleString()})`);
+    } else {
+      console.log(chalk.gray('\n  No sync history.'));
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`同步状态查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo sync conflict list
+ */
+async function syncConflictListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const conflicts = await repo.listConflicts({ status: 'pending' });
+
+    console.log(chalk.bold.cyan('\n  Pending Conflicts'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (conflicts.length === 0) {
+      console.log(chalk.green('  No pending conflicts.'));
+    } else {
+      for (const c of conflicts) {
+        console.log(`  ${chalk.yellow(c.id)}  ${c.resource}`);
+        console.log(`    ${chalk.gray('type:')} ${c.type}`);
+      }
+      console.log(chalk.gray(`\n  Use "lo sync conflict resolve <id> <local-win|remote-win>"`));
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`冲突列表查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo sync conflict resolve <id> <strategy>
+ */
+async function syncConflictResolveHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const result = await repo.resolveConflict(argv.id, argv.strategy);
+
+    console.log(chalk.green(`\n  Resolved: ${argv.id} (${argv.strategy})\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`冲突解决失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo graph query-federated <globalId>
+ */
+async function graphQueryFederatedHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+
+    const depth = argv.depth || 3;
+    const result = await repo.queryFederatedGraph(argv.globalId, { depth });
+
+    console.log(chalk.bold.cyan(`\n  Federated Query: ${argv.globalId} (depth ${depth})`));
+    console.log(chalk.gray('  ───────────────────────────────'));
+
+    console.log(`  Nodes: ${result.nodes.length}`);
+    console.log(`  Edges: ${result.edges.length}`);
+
+    if (result.nodes.length > 0) {
+      console.log(chalk.bold('\n  Nodes:'));
+      for (const n of result.nodes.slice(0, 20)) {
+        console.log(`    ${chalk.cyan(n.id)}  [${chalk.gray(n.source || '?')}]`);
+      }
+      if (result.nodes.length > 20) {
+        console.log(chalk.gray(`    ... and ${result.nodes.length - 20} more`));
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`联邦查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -1126,5 +1371,14 @@ module.exports = {
   knowledgeAIAsk: knowledgeAIAskHandler,
   automationRun: automationRunHandler,
   knowledgeLifecycle: knowledgeLifecycleHandler,
-  knowledgeRepairDiagnosis: knowledgeRepairHandler
+  knowledgeRepairDiagnosis: knowledgeRepairHandler,
+  federationList: federationListHandler,
+  federationAdd: federationAddHandler,
+  federationRemove: federationRemoveHandler,
+  syncPull: syncPullHandler,
+  syncPush: syncPushHandler,
+  syncStatus: syncStatusHandler,
+  syncConflictList: syncConflictListHandler,
+  syncConflictResolve: syncConflictResolveHandler,
+  graphQueryFederated: graphQueryFederatedHandler
 };

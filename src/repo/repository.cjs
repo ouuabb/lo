@@ -32,6 +32,10 @@ const KnowledgeRepair = require('./knowledgeRepair.cjs');
 const KnowledgeScheduler = require('./knowledgeScheduler.cjs');
 const ResourceLifecycle = require('../domain/resourceLifecycle.cjs');
 const ResourceWatcher = require('./resourceWatcher.cjs');
+const FederationManager = require('./federationManager.cjs');
+const FederatedGraphEngine = require('./federatedGraphEngine.cjs');
+const SyncEngine = require('./syncEngine.cjs');
+const GlobalRID = require('../domain/globalResourceId.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -1752,6 +1756,137 @@ class Repository {
       payload: (() => { try { return JSON.parse(r.payload || '{}'); } catch { return {}; } })(),
       created: r.created
     }));
+  }
+
+  // ──────────────────────────────────────
+  // Phase 5.10: Distributed Knowledge Graph
+  // ──────────────────────────────────────
+
+  /**
+   * 获取联邦管理器
+   */
+  getFederationManager() {
+    return new FederationManager(this.db, this.repoPath);
+  }
+
+  /**
+   * 获取联邦图引擎
+   */
+  getFederatedGraphEngine() {
+    return new FederatedGraphEngine();
+  }
+
+  /**
+   * 获取同步引擎
+   */
+  getSyncEngine() {
+    return new SyncEngine(this.db, this.repoPath);
+  }
+
+  /**
+   * 联邦仓库操作
+   */
+  async registerFederatedRepository(name, namespace, repoPath) {
+    const fm = this.getFederationManager();
+    return fm.register({ name, namespace, repoPath });
+  }
+
+  async removeFederatedRepository(namespaceOrName) {
+    const fm = this.getFederationManager();
+    return fm.remove(namespaceOrName);
+  }
+
+  async listFederatedRepositories() {
+    const fm = this.getFederationManager();
+    return fm.list();
+  }
+
+  /**
+   * 构建联邦图
+   * @param {string} localNamespace
+   */
+  async buildFederatedGraph(localNamespace) {
+    const fm = this.getFederationManager();
+    const sources = await fm.list();
+    const engine = this.getFederatedGraphEngine();
+    return engine.buildFederatedGraph(sources, this.repoPath, localNamespace || 'local');
+  }
+
+  /**
+   * 同步: pull
+   */
+  async syncPull(namespace) {
+    const fm = this.getFederationManager();
+    const repo = await fm.getByNamespace(namespace);
+    if (!repo) throw new Error(`Unknown namespace: ${namespace}`);
+
+    const se = this.getSyncEngine();
+    return se.pull(repo.path, namespace);
+  }
+
+  /**
+   * 同步: push
+   */
+  async syncPush(namespace) {
+    const fm = this.getFederationManager();
+    const repo = await fm.getByNamespace(namespace);
+    if (!repo) throw new Error(`Unknown namespace: ${namespace}`);
+
+    const se = this.getSyncEngine();
+    return se.push(repo.path, namespace);
+  }
+
+  /**
+   * 同步状态
+   */
+  async getSyncStatus() {
+    const se = this.getSyncEngine();
+    return se.status();
+  }
+
+  /**
+   * 冲突列表
+   */
+  async listConflicts(options) {
+    const se = this.getSyncEngine();
+    return se.listConflicts(options);
+  }
+
+  /**
+   * 解决冲突
+   */
+  async resolveConflict(conflictId, strategy) {
+    const se = this.getSyncEngine();
+    return se.resolveConflict(conflictId, strategy);
+  }
+
+  /**
+   * 在联邦中查找资源
+   */
+  async resolveFederatedResource(ridOrName) {
+    const fm = this.getFederationManager();
+    return fm.resolveResource(ridOrName);
+  }
+
+  /**
+   * 联邦图查询
+   * @param {string} fromId - globalId
+   * @param {{ depth?: number, sources?: Array<string> }} options
+   */
+  async queryFederatedGraph(fromId, options = {}) {
+    const { depth = 3, sources = null } = options;
+    const localNS = 'local'; // 当前仓库用 local namespace
+    const result = await this.buildFederatedGraph(localNS);
+    const engine = this.getFederatedGraphEngine();
+    return engine.queryFederated(result.graph, fromId, depth, sources);
+  }
+
+  /**
+   * 获取同步历史
+   */
+  async getSyncHistory(limit = 20) {
+    const se = this.getSyncEngine();
+    return se.syncHistory(limit);
   }
 
   async exportGraph(format = 'json', options = {}) {

@@ -419,7 +419,13 @@ cli
           .positional('b', { type: 'string', description: '目标资源' });
       }, graphCmd.explain)
 
-      .demandCommand(1, '请指定图子命令。可用: neighbors, backlinks, path, cycles, export, analyze, query, neighborhood, explain');
+      .command('query-federated <globalId>', '联邦图查询（Phase 5.10）', (yargs) => {
+        yargs
+          .positional('globalId', { type: 'string', description: '全局 ID（如 personal:note001）' })
+          .option('depth', { type: 'number', default: 3, description: '遍历深度' });
+      }, graphCmd.graphQueryFederated)
+
+      .demandCommand(1, '请指定图子命令。可用: neighbors, backlinks, path, cycles, export, analyze, query, neighborhood, explain, query-federated');
   })
 
   .command('move <rid> <dest>', '移动资源', (yargs) => {
@@ -697,6 +703,50 @@ cli
       .command('run', '运行完整自动化管线（lifecycle + repair + suggestion）', {}, graphCmd.automationRun)
 
       .demandCommand(1, '请指定自动化子命令。可用: run');
+  })
+
+  .command('federation', '联邦仓库管理（Phase 5.10）', (yargs) => {
+    yargs
+      .command('list', '列出已注册的联邦仓库', {}, graphCmd.federationList)
+
+      .command('add <path>', '注册联邦仓库', (yargs) => {
+        yargs
+          .positional('path', { type: 'string', description: '仓库路径' })
+          .option('namespace', { type: 'string', demandOption: true, description: '命名空间' })
+          .option('name', { type: 'string', description: '显示名称' });
+      }, graphCmd.federationAdd)
+
+      .command('remove <namespace>', '移除联邦仓库', (yargs) => {
+        yargs.positional('namespace', { type: 'string', description: '命名空间或名称' });
+      }, graphCmd.federationRemove)
+
+      .demandCommand(1, '请指定联邦子命令。可用: list, add, remove');
+  })
+
+  .command('sync', '知识同步（Phase 5.10）', (yargs) => {
+    yargs
+      .command('pull <namespace>', '从远程仓库拉取资源', (yargs) => {
+        yargs.positional('namespace', { type: 'string', description: '远程 namespace' });
+      }, graphCmd.syncPull)
+
+      .command('push <namespace>', '推送本地资源到远程仓库', (yargs) => {
+        yargs.positional('namespace', { type: 'string', description: '远程 namespace' });
+      }, graphCmd.syncPush)
+
+      .command('status', '查看同步状态', {}, graphCmd.syncStatus)
+
+      .command('conflict', '冲突管理', (yargs) => {
+        yargs
+          .command('list', '列出待解决冲突', {}, graphCmd.syncConflictList)
+          .command('resolve <id> <strategy>', '解决冲突', (yargs) => {
+            yargs
+              .positional('id', { type: 'string', description: 'Conflict ID' })
+              .positional('strategy', { type: 'string', description: 'local-win | remote-win | manual' });
+          }, graphCmd.syncConflictResolve)
+          .demandCommand(1, '请指定冲突子命令。可用: list, resolve');
+      })
+
+      .demandCommand(1, '请指定同步子命令。可用: pull, push, status, conflict');
   })
 
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {

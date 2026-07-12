@@ -291,6 +291,9 @@ class Database {
 
     // V11: knowledge_events + ai_suggestions 扩展（Phase 5.9）
     await this._migrateAutomationV11();
+
+    // V12: 分布式知识图谱（Phase 5.10）
+    await this._migrateDistributedV12();
   }
 
   run(sql, params = []) {
@@ -813,6 +816,72 @@ class Database {
       }
     } catch (e) {
       console.error('[migrate] Automation V11 失败:', e.message);
+    }
+  }
+
+  /**
+   * V12: Phase 5.10 Distributed Knowledge Graph
+   *   repositories      — 联邦仓库注册
+   *   remote_resources  — 远程资源元数据
+   *   sync_records      — 同步操作记录
+   *   conflicts         — 同步冲突
+   */
+  async _migrateDistributedV12() {
+    try {
+      // repositories
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS repositories (
+          id TEXT PRIMARY KEY,
+          namespace TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          path TEXT NOT NULL,
+          created INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_repositories_namespace ON repositories(namespace)`);
+
+      // remote_resources
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS remote_resources (
+          global_id TEXT PRIMARY KEY,
+          namespace TEXT,
+          metadata TEXT DEFAULT '{}',
+          hash TEXT,
+          updated INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_remote_resources_ns ON remote_resources(namespace)`);
+
+      // sync_records
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS sync_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          repository TEXT NOT NULL,
+          type TEXT NOT NULL,
+          status TEXT DEFAULT 'success',
+          changes INTEGER DEFAULT 0,
+          details TEXT DEFAULT '{}',
+          created INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_records_repo ON sync_records(repository)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_sync_records_type ON sync_records(type)`);
+
+      // conflicts
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS conflicts (
+          id TEXT PRIMARY KEY,
+          resource TEXT NOT NULL,
+          type TEXT DEFAULT 'content_conflict',
+          status TEXT DEFAULT 'pending',
+          payload TEXT DEFAULT '{}',
+          created INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_resource ON conflicts(resource)`);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts(status)`);
+    } catch (e) {
+      console.error('[migrate] Distributed V12 失败:', e.message);
     }
   }
 
