@@ -802,6 +802,27 @@ cli
       .demandCommand(1, '请指定事件子命令。可用: list, history, listeners, replay');
   })
 
+  .command('workflow', '工作流引擎（Phase 6.3）', (yargs) => {
+    yargs
+      .command('list', '列出工作流', {}, graphCmd.workflowList)
+
+      .command('run <id>', '执行工作流', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '工作流 ID' });
+        yargs.option('input', { type: 'string', description: '输入 JSON' });
+      }, graphCmd.workflowRun)
+
+      .command('status <id>', '查询执行状态', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '执行 ID' });
+      }, graphCmd.workflowStatus)
+
+      .command('history [id]', '查询执行历史', (yargs) => {
+        yargs.positional('id', { type: 'string', description: '工作流 ID（可选）' });
+        yargs.option('limit', { type: 'number', description: '数量限制', default: 20 });
+      }, graphCmd.workflowHistory)
+
+      .demandCommand(1, '请指定工作流子命令。可用: list, run, status, history');
+  })
+
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
     yargs
       .command('promote [path]', '提升容器成员为独立 Resource（--revert 降级）', (yargs) => {

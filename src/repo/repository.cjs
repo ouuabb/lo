@@ -46,6 +46,12 @@ const Event = require('../event/event.cjs');
 const EventBus = require('../event/eventBus.cjs');
 const EventStore = require('../event/eventStore.cjs');
 const EventMiddleware = require('../event/eventMiddleware.cjs');
+const Workflow = require('../workflow/workflow.cjs');
+const WorkflowRegistry = require('../workflow/workflowRegistry.cjs');
+const WorkflowEngine = require('../workflow/workflowEngine.cjs');
+const StepExecutor = require('../workflow/stepExecutor.cjs');
+const ConditionEngine = require('../workflow/conditionEngine.cjs');
+const WorkflowScheduler = require('../workflow/workflowScheduler.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2207,6 +2213,175 @@ class Repository {
   getRegisteredEventTypes() {
     const bus = this._getEventBus();
     return bus.registeredTypes();
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.3: Workflow Engine
+  // ──────────────────────────────────────
+
+  /**
+   * 获取 WorkflowEngine（懒初始化）
+   */
+  _getWorkflowEngine() {
+    if (!this._workflowEngine) {
+      const conditionEngine = new ConditionEngine({ logger: this.logger || console });
+
+      const stepExecutor = new StepExecutor({
+        repository: this,
+        pluginManager: this._pluginManager,
+        conditionEngine,
+        logger: this.logger || console
+      });
+
+      const registry = new WorkflowRegistry(this.db);
+
+      this._workflowEngine = new WorkflowEngine({
+        db: this.db,
+        registry,
+        stepExecutor,
+        conditionEngine,
+        eventBus: this._getEventBus(),
+        logger: this.logger || console
+      });
+
+      // 初始化调度器
+      this._workflowScheduler = new WorkflowScheduler({
+        eventBus: this._getEventBus(),
+        workflowEngine: this._workflowEngine,
+        logger: this.logger || console
+      });
+    }
+    return this._workflowEngine;
+  }
+
+  /**
+   * 初始化工作流系统
+   */
+  async initWorkflowSystem() {
+    const engine = this._getWorkflowEngine();
+    const loaded = await engine.registry.load();
+
+    // 注册内置工作流
+    if (loaded === 0) {
+      await this._registerBuiltinWorkflows();
+    }
+
+    return engine;
+  }
+
+  /**
+   * 注册内置工作流
+   */
+  async _registerBuiltinWorkflows() {
+    const engine = this._getWorkflowEngine();
+
+    // Knowledge Cleanup
+    const cleanup = new Workflow({
+      id: 'knowledge_cleanup',
+      name: '知识清理',
+      description: '检测遗忘知识并生成复习建议',
+      trigger: { type: 'manual' },
+      steps: [
+        { id: 'analyze', type: 'analysis', config: {} },
+        { id: 'suggest', type: 'ai', config: { generateSuggestions: true } },
+        { id: 'notify', type: 'notification', config: { message: '知识清理完成' } }
+      ]
+    });
+    await engine.register(cleanup);
+
+    // AI Summary
+    const aiSummary = new Workflow({
+      id: 'ai_summary',
+      name: 'AI 摘要生成',
+      description: '为新资源生成 AI 摘要',
+      trigger: { type: 'event', event: 'resource.created' },
+      steps: [
+        { id: 'analyze', type: 'analysis', config: {} },
+        { id: 'summarize', type: 'ai', config: { query: '总结最近创建的资源' } },
+        { id: 'notify', type: 'notification', config: { message: 'AI 摘要已生成' } }
+      ]
+    });
+    await engine.register(aiSummary);
+
+    // Knowledge Review
+    const review = new Workflow({
+      id: 'knowledge_review',
+      name: '知识审查',
+      description: '定期审查重要知识',
+      trigger: { type: 'schedule', schedule: { cron: 'weekly', time: '09:00' } },
+      steps: [
+        { id: 'check', type: 'condition', config: { condition: 'true' } },
+        { id: 'analyze', type: 'analysis', config: {} },
+        { id: 'notify', type: 'notification', config: { message: '知识审查完成' } }
+      ]
+    });
+    await engine.register(review);
+  }
+
+  /**
+   * 创建工作流
+   */
+  async createWorkflow(def) {
+    const engine = this._getWorkflowEngine();
+    const wf = new Workflow(def);
+    await engine.register(wf);
+    return wf.toJSON();
+  }
+
+  /**
+   * 列出工作流
+   */
+  async listWorkflows() {
+    const engine = this._getWorkflowEngine();
+    return engine.listWorkflows();
+  }
+
+  /**
+   * 执行工作流
+   */
+  async executeWorkflow(id, input) {
+    const engine = this._getWorkflowEngine();
+    return engine.execute(id, input);
+  }
+
+  /**
+   * 暂停工作流
+   */
+  async pauseWorkflow(executionId) {
+    const engine = this._getWorkflowEngine();
+    return engine.pause(executionId);
+  }
+
+  /**
+   * 恢复工作流
+   */
+  async resumeWorkflow(executionId) {
+    const engine = this._getWorkflowEngine();
+    return engine.resume(executionId);
+  }
+
+  /**
+   * 取消工作流
+   */
+  async cancelWorkflow(executionId) {
+    const engine = this._getWorkflowEngine();
+    return engine.cancel(executionId);
+  }
+
+  /**
+   * 工作流执行状态
+   */
+  async getWorkflowStatus(executionId) {
+    const engine = this._getWorkflowEngine();
+    return engine.status(executionId);
+  }
+
+  /**
+   * 工作流执行历史
+   */
+  async getWorkflowHistory(workflowId, limit) {
+    const engine = this._getWorkflowEngine();
+    return engine.getHistory(workflowId, limit);
   }
 
   async exportGraph(format = 'json', options = {}) {

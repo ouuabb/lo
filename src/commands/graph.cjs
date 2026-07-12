@@ -1840,6 +1840,149 @@ async function eventReplayHandler(argv) {
   }
 }
 
+// ═══════════ Phase 6.3: Workflow Handlers ═══════════
+
+/**
+ * lo workflow list
+ */
+async function workflowListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initWorkflowSystem();
+
+    const workflows = await repo.listWorkflows();
+
+    console.log(chalk.bold.cyan('\n  Workflows'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (workflows.length === 0) {
+      console.log(chalk.gray('  No workflows registered.'));
+    } else {
+      for (const wf of workflows) {
+        const statusIcon = wf.status === 'active' ? chalk.green('active') : chalk.gray(wf.status);
+        console.log(`  ${chalk.cyan(wf.id.padEnd(28))}  ${chalk.yellow(wf.name.padEnd(16))}  ${chalk.gray(String(wf.stepCount).padStart(3))} steps  ${statusIcon}`);
+        if (wf.description) {
+          console.log(`    ${chalk.gray(wf.description)}`);
+        }
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`工作流列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo workflow run <id>
+ */
+async function workflowRunHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initWorkflowSystem();
+
+    const result = await repo.executeWorkflow(argv.id, argv.input ? JSON.parse(argv.input) : {});
+
+    console.log(chalk.bold.cyan('\n  Workflow Result'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Execution ID:')}  ${result.executionId}`);
+    console.log(`  ${chalk.cyan('Status:')}       ${result.status === 'completed' ? chalk.green(result.status) : chalk.red(result.status)}`);
+    console.log(`  ${chalk.cyan('Steps:')}        ${Object.keys(result.results).length}`);
+    console.log('');
+
+    for (const [stepId, stepResult] of Object.entries(result.results)) {
+      const icon = stepResult.success !== false ? chalk.green('✓') : chalk.red('✗');
+      console.log(`    ${icon} ${chalk.yellow(stepId)}`);
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`工作流执行失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo workflow status <executionId>
+ */
+async function workflowStatusHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initWorkflowSystem();
+
+    const status = await repo.getWorkflowStatus(argv.id);
+
+    if (!status) {
+      console.log(chalk.yellow(`\n  Execution '${argv.id}' not found.\n`));
+    } else {
+      console.log(chalk.bold.cyan('\n  Workflow Execution'));
+      console.log(chalk.gray('  ───────────────────────────────\n'));
+      console.log(`  ${chalk.cyan('ID:')}        ${status.id}`);
+      console.log(`  ${chalk.cyan('Workflow:')}  ${status.workflowId}`);
+      console.log(`  ${chalk.cyan('Status:')}    ${status.status === 'completed' ? chalk.green(status.status) : status.status === 'failed' ? chalk.red(status.status) : chalk.yellow(status.status)}`);
+      console.log(`  ${chalk.cyan('Created:')}   ${new Date(status.createdAt).toLocaleString()}`);
+
+      if (status.context && status.context.results) {
+        console.log(`\n  ${chalk.cyan('Steps:')}`);
+        for (const [stepId, result] of Object.entries(status.context.results)) {
+          const icon = result.success !== false ? chalk.green('✓') : chalk.red('✗');
+          console.log(`    ${icon} ${chalk.yellow(stepId)}`);
+        }
+      }
+
+      console.log('');
+    }
+
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`工作流状态查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo workflow history [workflowId]
+ */
+async function workflowHistoryHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initWorkflowSystem();
+
+    const history = await repo.getWorkflowHistory(argv.id || null, argv.limit || 20);
+
+    console.log(chalk.bold.cyan('\n  Workflow History'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (history.length === 0) {
+      console.log(chalk.gray('  No executions recorded.'));
+    } else {
+      for (const h of history) {
+        const statusIcon = h.status === 'completed' ? chalk.green('✓') :
+                           h.status === 'failed' ? chalk.red('✗') : chalk.yellow('○');
+        const time = new Date(h.createdAt).toLocaleString();
+        console.log(`  ${statusIcon} ${chalk.cyan(h.id.slice(0, 20).padEnd(22))} ${chalk.yellow(h.workflowId.padEnd(24))} ${chalk.gray(time)}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`工作流历史查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -1888,5 +2031,9 @@ module.exports = {
   eventList: eventListHandler,
   eventHistory: eventHistoryHandler,
   eventListeners: eventListenersHandler,
-  eventReplay: eventReplayHandler
+  eventReplay: eventReplayHandler,
+  workflowList: workflowListHandler,
+  workflowRun: workflowRunHandler,
+  workflowStatus: workflowStatusHandler,
+  workflowHistory: workflowHistoryHandler
 };

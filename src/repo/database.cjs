@@ -303,6 +303,9 @@ class Database {
 
     // V15: events（Phase 6.2）
     await this._migrateEventV15();
+
+    // V16: workflow engine（Phase 6.3）
+    await this._migrateWorkflowV16();
   }
 
   run(sql, params = []) {
@@ -968,6 +971,39 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)`);
     } catch (e) {
       console.error('[migrate] Event V15 失败:', e.message);
+    }
+  }
+
+  /**
+   * V16: Phase 6.3 Workflow Engine
+   *   workflows           — 工作流定义
+   *   workflow_executions — 执行记录
+   */
+  async _migrateWorkflowV16() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS workflows (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          definition TEXT,
+          status TEXT DEFAULT 'active',
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS workflow_executions (
+          id TEXT PRIMARY KEY,
+          workflow_id TEXT,
+          status TEXT,
+          context TEXT,
+          created_at INTEGER,
+          updated_at INTEGER
+        )
+      `);
+      await this.run(`CREATE INDEX IF NOT EXISTS idx_wfexec_workflow ON workflow_executions(workflow_id)`);
+    } catch (e) {
+      console.error('[migrate] Workflow V16 失败:', e.message);
     }
   }
 
