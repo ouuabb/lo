@@ -2255,6 +2255,121 @@ async function agentMemoryHandler(argv) {
   }
 }
 
+// ═══════════ Phase 6.6: Collaboration Handlers ═══════════
+
+/**
+ * lo team list
+ */
+async function teamListHandler() {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initCollaborationSystem();
+
+    const teams = await repo.listAgentTeams();
+
+    console.log(chalk.bold.cyan('\n  Agent Teams'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (teams.length === 0) {
+      console.log(chalk.gray('  No teams registered.'));
+    } else {
+      for (const t of teams) {
+        console.log(`  ${chalk.cyan(t.id.padEnd(30))}  ${chalk.yellow(t.strategy.padEnd(12))}  ${chalk.gray(t.memberCount + ' members')}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`团队列表失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo team run <id> <goal>
+ */
+async function teamRunHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initCollaborationSystem();
+
+    const result = await repo.executeAgentTeam(argv.id, argv.goal);
+
+    console.log(chalk.bold.cyan('\n  Team Execution'));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+    console.log(`  ${chalk.cyan('Team:')}     ${result.teamId}`);
+    console.log(`  ${chalk.cyan('Goal:')}     ${result.goal}`);
+    console.log(`  ${chalk.cyan('Status:')}   ${result.status === 'completed' ? chalk.green(result.status) : chalk.red(result.status)}`);
+    console.log(`  ${chalk.cyan('Subtasks:')} ${result.completedSubtasks}/${result.subtaskCount}`);
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`团队执行失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo agent messages [agentId]
+ */
+async function agentMessagesHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initCollaborationSystem();
+
+    const agentId = argv.agentId || 'system';
+    const messages = await repo.getAgentMessages(agentId, argv.limit || 15);
+
+    console.log(chalk.bold.cyan(`\n  Messages${agentId ? ` for ${agentId}` : ''}`));
+    console.log(chalk.gray('  ───────────────────────────────\n'));
+
+    if (messages.length === 0) {
+      console.log(chalk.gray('  No messages.'));
+    } else {
+      for (const m of messages) {
+        const typeIcon = m.type === 'request' ? chalk.yellow('→') :
+                         m.type === 'response' ? chalk.green('←') : chalk.gray('•');
+        const time = new Date(m.createdAt).toLocaleString();
+        console.log(`  ${typeIcon} ${chalk.cyan(m.from.padEnd(20))} → ${m.to.padEnd(20)} ${chalk.gray(time)}`);
+      }
+    }
+
+    console.log('');
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`消息查询失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * lo agent send <from> <to> <message>
+ */
+async function agentSendHandler(argv) {
+  try {
+    const repo = new Repository(process.cwd());
+    await repo.open({ skipAuth: true });
+    await repo.initCollaborationSystem();
+
+    const msg = await repo.sendAgentMessage(argv.from, argv.to, 'request', { text: argv.message });
+
+    console.log(chalk.green(`\n  Message sent: ${msg.id}\n`));
+    await repo.close();
+    process.exit(0);
+  } catch (error) {
+    Logger.error(`消息发送失败: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 module.exports = {
   neighbors: neighborsHandler,
   backlinks: backlinksHandler,
@@ -2315,5 +2430,9 @@ module.exports = {
   agentList: agentListHandler,
   agentInfo: agentInfoHandler,
   agentRun: agentRunHandler,
-  agentMemory: agentMemoryHandler
+  agentMemory: agentMemoryHandler,
+  teamList: teamListHandler,
+  teamRun: teamRunHandler,
+  agentMessages: agentMessagesHandler,
+  agentSend: agentSendHandler
 };

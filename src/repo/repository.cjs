@@ -60,6 +60,11 @@ const AgentRegistry = require('../agent/agentRegistry.cjs');
 const AgentEngine = require('../agent/agentEngine.cjs');
 const AgentStore = require('../agent/agentStore.cjs');
 const AgentScheduler = require('../agent/agentScheduler.cjs');
+const TeamRegistry = require('../collaboration/teamRegistry.cjs');
+const CollaborationEngine = require('../collaboration/collaborationEngine.cjs');
+const CollaborationMemory = require('../collaboration/collaborationMemory.cjs');
+const SharedMemory = require('../collaboration/sharedMemory.cjs');
+const MessageBus = require('../collaboration/messageBus.cjs');
 const { loadOperations } = require('../operations/index.cjs');
 const glob = require('glob');
 const fs = require('fs-extra');
@@ -2580,6 +2585,80 @@ class Repository {
   async getAgentMemory(agentId, limit) {
     const engine = this._getAgentEngine();
     return engine.getMemory(agentId, limit);
+  }
+
+  // ──────────────────────────────────────
+  // Phase 6.6: Multi-Agent Collaboration
+  // ──────────────────────────────────────
+
+  _getCollaborationEngine() {
+    if (!this._collaborationEngine) {
+      const teamRegistry = new TeamRegistry();
+      const memory = new CollaborationMemory(this.db);
+      const messageBus = new MessageBus({ memory, eventBus: this._getEventBus() });
+      const sharedMemory = new SharedMemory();
+
+      this._collaborationEngine = new CollaborationEngine({
+        teamRegistry,
+        messageBus,
+        sharedMemory,
+        memory,
+        agentEngine: this._agentEngine,
+        eventBus: this._getEventBus(),
+        logger: this.logger || console
+      });
+    }
+    return this._collaborationEngine;
+  }
+
+  async initCollaborationSystem() {
+    const engine = this._getCollaborationEngine();
+    return engine;
+  }
+
+  async createAgentTeam(def) {
+    const engine = this._getCollaborationEngine();
+    return engine.createTeam(def);
+  }
+
+  async listAgentTeams() {
+    const engine = this._getCollaborationEngine();
+    return engine.listTeams();
+  }
+
+  async sendAgentMessage(from, to, type, payload) {
+    const engine = this._getCollaborationEngine();
+    return engine.sendMessage(from, to, type, payload);
+  }
+
+  async getAgentMessages(agentId, limit) {
+    const engine = this._getCollaborationEngine();
+    return engine.getMessages(agentId, limit);
+  }
+
+  async createAgentTask(teamId, goal) {
+    const engine = this._getCollaborationEngine();
+    return engine.createTask(teamId, goal);
+  }
+
+  async assignAgentTask(taskId) {
+    const engine = this._getCollaborationEngine();
+    return engine.assignTask(taskId);
+  }
+
+  async executeAgentTeam(teamId, goal) {
+    const engine = this._getCollaborationEngine();
+    return engine.executeTeam(teamId, goal);
+  }
+
+  async getSharedMemory(scope, type) {
+    const engine = this._getCollaborationEngine();
+    return engine.getSharedMemory(scope, type);
+  }
+
+  async getCollaborationHistory(teamId, limit) {
+    const memory = new CollaborationMemory(this.db);
+    return memory.listTasks(teamId, limit);
   }
 
   async exportGraph(format = 'json', options = {}) {

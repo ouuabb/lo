@@ -312,6 +312,9 @@ class Database {
 
     // V18: agent system（Phase 6.5）
     await this._migrateAgentV18();
+
+    // V19: multi-agent collaboration（Phase 6.6）
+    await this._migrateCollabV19();
   }
 
   run(sql, params = []) {
@@ -1119,6 +1122,47 @@ class Database {
       await this.run(`CREATE INDEX IF NOT EXISTS idx_agmem_agent ON agent_memory(agent_id)`);
     } catch (e) {
       console.error('[migrate] Agent V18 失败:', e.message);
+    }
+  }
+
+  /**
+   * V19: Phase 6.6 Multi-Agent Collaboration
+   *   agent_messages — 消息
+   *   agent_teams    — 团队
+   *   agent_tasks    — 任务
+   */
+  async _migrateCollabV19() {
+    try {
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS agent_messages (
+          id TEXT PRIMARY KEY,
+          from_agent TEXT,
+          to_agent TEXT,
+          type TEXT,
+          payload TEXT,
+          created_at INTEGER
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS agent_teams (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          strategy TEXT
+        )
+      `);
+
+      await this.run(`
+        CREATE TABLE IF NOT EXISTS agent_tasks (
+          id TEXT PRIMARY KEY,
+          team_id TEXT,
+          goal TEXT,
+          status TEXT,
+          result TEXT
+        )
+      `);
+    } catch (e) {
+      console.error('[migrate] Collab V19 失败:', e.message);
     }
   }
 

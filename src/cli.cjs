@@ -861,7 +861,26 @@ cli
         yargs.positional('id', { type: 'string', description: 'Agent ID' });
         yargs.option('limit', { type: 'number', description: '数量限制', default: 10 });
       }, graphCmd.agentMemory)
-      .demandCommand(1, '请指定 Agent 子命令。可用: list, info, run, memory');
+      .command('messages', '查看 Agent 消息', (yargs) => {
+        yargs.option('agentId', { type: 'string', description: 'Agent ID 过滤' });
+        yargs.option('limit', { type: 'number', description: '数量限制', default: 15 });
+      }, graphCmd.agentMessages)
+      .command('send <from> <to> <message>', '发送 Agent 消息', (yargs) => {
+        yargs.positional('from', { type: 'string', description: '发送方' });
+        yargs.positional('to', { type: 'string', description: '接收方' });
+        yargs.positional('message', { type: 'string', description: '消息内容' });
+      }, graphCmd.agentSend)
+      .demandCommand(1, '请指定 Agent 子命令。可用: list, info, run, memory, messages, send');
+  })
+
+  .command('team', 'Agent 团队协作（Phase 6.6）', (yargs) => {
+    yargs
+      .command('list', '列出 Agent 团队', {}, graphCmd.teamList)
+      .command('run <id> <goal>', '执行团队协作任务', (yargs) => {
+        yargs.positional('id', { type: 'string', description: 'Team ID' });
+        yargs.positional('goal', { type: 'string', description: '协作目标' });
+      }, graphCmd.teamRun)
+      .demandCommand(1, '请指定团队子命令。可用: list, run');
   })
 
   .command('container', '容器管理（提升/降级、状态、扫描、同步、列表、成员、忽略）', (yargs) => {
