@@ -3356,6 +3356,7 @@ class Repository {
 
   static async create(repoPath) {
     await fs.ensureDir(repoPath);
+    await fs.ensureDir(path.join(repoPath, '.repo'));
     await fs.ensureDir(path.join(repoPath, 'resources'));
     
     const repo = new Repository(repoPath);
