@@ -1208,20 +1208,16 @@ cli
       });
   }, log)
 
-  .command('stack [action] [name] [layer]', '管理资源栈（同名冲突的冗余副本）', (yargs) => {
+  .command('stack [action] [rid]', '管理同名资源栈（同名冲突的冗余副本）', (yargs) => {
     yargs
       .positional('action', {
         type: 'string',
         description: '栈操作',
-        choices: ['list', 'pop', 'drop']
+        choices: ['list', 'promote', 'remove']
       })
-      .positional('name', {
+      .positional('rid', {
         type: 'string',
-        description: '资源名称'
-      })
-      .positional('layer', {
-        type: 'number',
-        description: '栈层级（用于 drop）'
+        description: '资源 RID（用于 promote / remove）'
       });
   }, stack)
 

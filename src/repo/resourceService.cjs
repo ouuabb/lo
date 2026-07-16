@@ -109,7 +109,7 @@ class ResourceService {
         }
       }
       if (layer === 0) {
-        throw new Error(`资源名称 "${name}" 栈已满（最多 20 层，含活跃层），无法入栈。请先 lo stack drop 释放空间。`);
+        throw new Error(`资源名称 "${name}" 栈已满（最多 20 层，含活跃层），无法入栈。请先 lo stack remove 释放空间。`);
       }
     }
 
@@ -265,53 +265,99 @@ class ResourceService {
   }
 
   /**
-   * 出栈：将栈顶（最小 layer>0）提升为活跃层（layer=0），原活跃层压入栈
-   * @param {string} name
+   * 提升：将指定 RID 的资源提升为活跃层（layer=0），原活跃层降入栈
+   *
+   * 与旧 popFromStack 的区别：
+   *   - pop 按 name 操作，总是弹出栈顶（最小 layer>0）
+   *   - promote 按 rid 操作，可以提升任意栈层，因为 RID 是稳定身份
+   *
+   * @param {string} rid - 要提升的资源 RID
    * @returns {Promise<object>} 新的活跃层资源
+   */
+  async promote(rid) {
+    const target = await this.getByRid(rid);
+    if (!target) {
+      throw new Error(`资源不存在: ${rid}`);
+    }
+    if (target.layer === 0) {
+      throw new Error(`资源 ${rid} 已经是活跃层（layer=0），无需提升`);
+    }
+
+    const name = target.name;
+    const targetOldLayer = target.layer;
+
+    // 找到当前活跃层
+    const active = await this.getByName(name);
+    if (!active) {
+      // 无活跃层：直接设为目标为 layer 0
+      await this.db.run('UPDATE resources SET layer = 0 WHERE rid = ?', [rid]);
+      return this.getByRid(rid);
+    }
+
+    // 三步交换，避免 UNIQUE(name,layer) 约束冲突
+    await this.db.run('SAVEPOINT tx_promote');
+    try {
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [-1, active.rid]);
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [0, target.rid]);
+      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [targetOldLayer, active.rid]);
+      await this.db.run('RELEASE tx_promote');
+    } catch (e) {
+      await this.db.run('ROLLBACK TO tx_promote');
+      throw e;
+    }
+
+    return this.getByRid(rid);
+  }
+
+  /**
+   * 从栈中移除指定 RID 的资源（硬删除）
+   *
+   * 与旧 dropLayer 的区别：
+   *   - dropLayer 按 name+layer 定位，layer 是动态位置
+   *   - removeFromStack 按 rid 定位，RID 是稳定身份
+   *
+   * @param {string} rid - 要移除的资源 RID
+   * @returns {Promise<object>} { rid, removed: true }
+   */
+  async removeFromStack(rid) {
+    const resource = await this.getByRid(rid);
+    if (!resource) {
+      throw new Error(`资源不存在: ${rid}`);
+    }
+    if (resource.layer === 0) {
+      throw new Error('不能移除活跃层（layer=0），请先 promote 其他资源或使用 delete');
+    }
+    // 硬删除
+    await this.db.run('DELETE FROM resources WHERE rid = ?', [rid]);
+    await this.db.run('DELETE FROM relations WHERE from_rid = ? OR to_rid = ?', [rid, rid]);
+    return { rid, removed: true };
+  }
+
+  // ── 以下为向后兼容的旧方法，已废弃 ──
+
+  /**
+   * @deprecated 使用 promote(rid) 代替
    */
   async popFromStack(name) {
     const stack = await this.getStack(name);
     if (stack.length < 2) {
       throw new Error(`资源 "${name}" 栈中没有可弹出的层`);
     }
-
-    // stack[0] = 活跃层 (layer=0), stack[1] = 栈顶（layer 最小且 >0）
-    const active = stack[0];
-    const top = stack[1];
-    const targetLayer = top.layer; // 栈顶原来的层号
-
-    await this.db.run('SAVEPOINT tx_pop');
-    try {
-      // 三步交换，避免 UNIQUE(name,layer) 约束冲突
-      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [-1, active.rid]);
-      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [0, top.rid]);
-      await this.db.run('UPDATE resources SET layer = ? WHERE rid = ?', [targetLayer, active.rid]);
-      await this.db.run('RELEASE tx_pop');
-    } catch (e) {
-      await this.db.run('ROLLBACK TO tx_pop');
-      throw e;
-    }
-
-    return this.getByRid(top.rid);
+    return this.promote(stack[1].rid);
   }
 
   /**
-   * 丢弃指定层
-   * @param {string} name
-   * @param {number} layer - 层号（不能为 0）
+   * @deprecated 使用 removeFromStack(rid) 代替
    */
   async dropLayer(name, layer) {
     if (layer === 0) {
-      throw new Error('不能丢弃活跃层（layer=0），请先 pop 或 delete');
+      throw new Error('不能丢弃活跃层（layer=0），请先 promote 或 delete');
     }
     const resource = await this.getByNameLayer(name, layer);
     if (!resource) {
       throw new Error(`资源 "${name}" 的 layer ${layer} 不存在`);
     }
-    // 硬删除
-    await this.db.run('DELETE FROM resources WHERE rid = ?', [resource.rid]);
-    await this.db.run('DELETE FROM relations WHERE from_rid = ? OR to_rid = ?', [resource.rid, resource.rid]);
-    return { rid: resource.rid, dropped: true };
+    return this.removeFromStack(resource.rid);
   }
 
   async getByPath(filePath) {

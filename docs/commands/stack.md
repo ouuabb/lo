@@ -1,6 +1,6 @@
-## stack — 管理资源栈
+## stack — 管理同名资源栈
 
-**用法:** `lo stack <list|pop|drop> [name] [layer]`
+**用法:** `lo stack <list|promote|remove> [rid]`
 
 管理同名资源冲突时自动保存的冗余副本（栈层）。
 
@@ -16,20 +16,22 @@
 
 | 子命令 | 说明 |
 |--------|------|
-| `list` | 列出所有栈中资源，按 name 分组显示 |
-| `pop <name>` | 弹出栈顶，提升为活跃层（原活跃层入栈） |
-| `drop <name> <layer>` | 丢弃指定栈层（硬删除） |
+| `list` | 列出所有栈中资源，按 name 分组显示（含 RID） |
+| `promote <rid>` | 提升指定资源为活跃层（layer=0），原活跃层降入栈 |
+| `remove <rid>` | 从栈中移除指定资源（硬删除） |
 
 ### 示例
 
 ```
-lo stack list                        # 查看所有栈中资源
-lo stack pop 笔记测试                  # 将栈顶提升为活跃
-lo stack drop 笔记测试 1               # 丢弃 layer 1
+lo stack list                              # 查看所有栈中资源及其 RID
+lo stack promote res_abc123def456           # 将指定资源提升为活跃层
+lo stack remove res_abc123def456            # 从栈中移除指定资源
 ```
 
 ### 注意事项
 
+- promote 和 remove 都使用 RID（稳定身份），而非 name+layer（动态位置）
+- 先用 `lo stack list` 查看栈中资源的 RID，再执行 promote / remove
 - 栈最多 20 层（layer 0~19），超过会回退到 `.conflict` 文件方式
 - pull 冲突产生的远程版本会自动入栈，conflict_source 标记为 "remote"
 - 合并冲突后走正常的 add → commit 流程

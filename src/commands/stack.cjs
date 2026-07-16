@@ -21,8 +21,8 @@ module.exports = async function stack(argv) {
     const rs = repo.resourceService;
 
     switch (subcommand) {
+      // ── list ──
       case 'list': {
-        // 列出所有在栈中的资源（layer >= 1）
         const all = await rs.getAll();
         const stacked = all.filter(r => r.layer >= 1);
 
@@ -46,68 +46,71 @@ module.exports = async function stack(argv) {
           group.stacked.sort((a, b) => a.layer - b.layer);
 
           const activeStr = group.active
-            ? `${chalk.green(group.active.type)} ${chalk.green.bold(group.active.rid.substring(0, 12) + '...')} ${group.active.path}`
+            ? `${chalk.green.bold(group.active.rid.substring(0, 12))}...  ${chalk.gray(group.active.path)}`
             : '无活跃层';
 
-          console.log(`${chalk.bold(name)} (活跃: ${activeStr})`);
+          console.log(`${chalk.bold(name)}  ${chalk.gray('(活跃:')} ${activeStr}${chalk.gray(')')}`);
           for (const r of group.stacked) {
             const title = r.metadata?.title || '(无标题)';
-            console.log(`  [layer ${r.layer}] ${chalk.yellow(title)}  rid=${truncateRid(r.rid)}  ${chalk.gray(r.path)}  ${chalk.gray(formatDate(r.created))}`);
+            console.log(`  [layer ${r.layer}] ${chalk.yellow.bold(truncateRid(r.rid))}  ${chalk.yellow(title)}  ${chalk.gray(r.path)}  ${chalk.gray(formatDate(r.created))}`);
           }
+          console.log(chalk.dim(`  提升: lo stack promote <rid>    移除: lo stack remove <rid>`));
           console.log('');
         }
 
         break;
       }
 
-      case 'pop': {
-        const name = argv.name;
-        if (!name) {
-          Logger.error('用法: lo stack pop <name>');
+      // ── promote ──
+      case 'promote': {
+        const rid = argv.rid;
+        if (!rid) {
+          Logger.error('用法: lo stack promote <rid>');
+          Logger.info('提示: 先用 lo stack list 查看栈中资源的 RID');
           process.exit(1);
         }
 
-        const stack = await rs.getStack(name);
-        if (stack.length < 2) {
-          Logger.warn(`资源 "${name}" 没有栈层可弹出`);
-          await repo.close();
-          process.exit(0);
+        // 显示栈状态
+        const target = await rs.getByRid(rid);
+        if (!target) {
+          Logger.error(`资源不存在: ${rid}`);
+          process.exit(1);
         }
 
-        // 显示当前栈状态
-        console.log(`${chalk.bold(name)} 当前栈: ${stack.map(r => `L${r.layer}(${truncateRid(r.rid)})`).join(' → ')}`);
+        const stack = await rs.getStack(target.name);
+        console.log(`${chalk.bold(target.name)} 当前栈: ${stack.map(r => `L${r.layer}(${truncateRid(r.rid)})`).join(' → ')}`);
 
-        const newActive = await rs.popFromStack(name);
-        const newStack = await rs.getStack(name);
-        console.log(`${chalk.green('✓')} 弹出成功！`);
-        console.log(`  新活跃: ${truncateRid(newActive.rid)} (${newActive.path})`);
-        console.log(`  当前栈: ${newStack.map(r => `L${r.layer}(${truncateRid(r.rid)})`).join(' → ')}`);
+        const newActive = await rs.promote(rid);
+        const newStack = await rs.getStack(target.name);
+        console.log(`${chalk.green('✓')} 提升成功！`);
+        console.log(`  新活跃 (layer=0): ${truncateRid(newActive.rid)} ${chalk.yellow(newActive.metadata?.title || '')}  (${newActive.path})`);
+        console.log(`  当前栈: ${newStack.filter(r => r.layer > 0).map(r => `L${r.layer}(${truncateRid(r.rid)})`).join(' → ') || '(空)'}`);
 
         break;
       }
 
-      case 'drop': {
-        const name = argv.name;
-        const layer = argv.layer;
-
-        if (!name || layer == null) {
-          Logger.error('用法: lo stack drop <name> <layer>');
+      // ── remove ──
+      case 'remove': {
+        const rid = argv.rid;
+        if (!rid) {
+          Logger.error('用法: lo stack remove <rid>');
+          Logger.info('提示: 先用 lo stack list 查看栈中资源的 RID');
           process.exit(1);
         }
 
-        if (layer === 0) {
-          Logger.error('不能丢弃活跃层 (layer=0)，请先 pop');
-          process.exit(1);
-        }
-
-        const resource = await rs.getByNameLayer(name, layer);
+        const resource = await rs.getByRid(rid);
         if (!resource) {
-          Logger.error(`资源 "${name}" 不存在 layer ${layer}`);
+          Logger.error(`资源不存在: ${rid}`);
           process.exit(1);
         }
 
-        const result = await rs.dropLayer(name, layer);
-        console.log(`${chalk.green('✓')} 已丢弃 ${name}[layer ${layer}] (rid: ${truncateRid(result.rid)})`);
+        if (resource.layer === 0) {
+          Logger.error('不能移除活跃层 (layer=0)，请先 promote 其他资源再移除');
+          process.exit(1);
+        }
+
+        const result = await rs.removeFromStack(rid);
+        console.log(`${chalk.green('✓')} 已移除 ${chalk.yellow(resource.name)} [layer ${resource.layer}]  (rid: ${truncateRid(result.rid)})`);
 
         break;
       }
@@ -116,9 +119,9 @@ module.exports = async function stack(argv) {
         Logger.error(`未知的子命令: ${subcommand}`);
         console.log('');
         console.log('lo stack <子命令>');
-        console.log('  list                列出栈中所有资源');
-        console.log('  pop  <name>         弹出栈顶，提升为活跃层');
-        console.log('  drop <name> <layer> 丢弃指定栈层');
+        console.log('  list               列出同名资源栈');
+        console.log('  promote <rid>      提升指定资源为活跃层（layer=0）');
+        console.log('  remove  <rid>      从栈中移除指定资源（硬删除）');
         process.exit(1);
     }
 

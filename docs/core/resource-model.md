@@ -328,8 +328,8 @@ lo new "周报"    → 文件: 2026-07-01-周报-e5f6g7h8.md → 入栈 (layer 1
 
 ```bash
 lo stack list                          # 列出所有栈中资源（layer >= 1）
-lo stack pop <name>                    # 弹出栈顶，提升为活跃层（原活跃层入栈）
-lo stack drop <name> <layer>           # 硬删除指定栈层（不可恢复）
+lo stack promote <rid>                 # 提升指定资源为活跃层（原活跃层降入栈）
+lo stack remove <rid>                  # 从栈中移除指定资源（硬删除，不可恢复）
 ```
 
 > 禁止直接操作文件系统管理栈，所有栈操作必须通过 `lo stack` 命令。

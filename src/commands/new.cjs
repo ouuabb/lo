@@ -21,7 +21,7 @@ module.exports = async function newResource(argv) {
     const activeByName = await repo.resourceService.getByName(slug);
     if (activeByName) {
       Logger.warn(`资源名称 "${slug}" 已存在活跃层（rid: ${activeByName.rid}），新文件将在提交时自动入栈。`);
-      Logger.info('提示: 使用 lo stack list 查看栈中资源，lo stack pop 可提升为活跃层。');
+      Logger.info('提示: 使用 lo stack list 查看栈中资源，lo stack promote <rid> 可提升为活跃层。');
     }
 
     // 文件名含随机后缀，保证磁盘层面永无冲突
