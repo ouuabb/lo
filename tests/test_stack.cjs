@@ -192,32 +192,7 @@ describe('Stack: removeFromStack(rid)', () => {
   });
 });
 
-// ── Test 5: 向后兼容 ──────────────────────────────
-
-describe('Stack: 向后兼容 (backward compat)', () => {
-  let activeRid, stackedRid;
-
-  beforeEach(async () => {
-    activeRid = RidUtils.generate();
-    stackedRid = RidUtils.generate();
-    await createTestResource('test1', { rid: activeRid, layer: 0, suffix: '_active' });
-    await createTestResource('test1', { rid: stackedRid, layer: 1, suffix: '_stacked' });
-  });
-
-  test('popFromStack(name) 仍然可用，弹出栈顶', async () => {
-    const result = await rs.popFromStack('test1');
-    expect(result.rid).toBe(stackedRid);
-    expect(result.layer).toBe(0);
-  });
-
-  test('dropLayer(name, layer) 仍然可用', async () => {
-    await rs.dropLayer('test1', 1);
-    const gone = await rs.getByRid(stackedRid);
-    expect(gone).toBeNull();
-  });
-});
-
-// ── Test 6: 完整流程 ──────────────────────────────
+// ── Test 5: 完整流程 ──────────────────────────────
 
 describe('Stack: 完整端到端流程', () => {
   test('创建 → 入栈 → 查看 → 提升 → 移除', async () => {

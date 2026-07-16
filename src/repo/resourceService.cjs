@@ -267,9 +267,6 @@ class ResourceService {
   /**
    * 提升：将指定 RID 的资源提升为活跃层（layer=0），原活跃层降入栈
    *
-   * 与旧 popFromStack 的区别：
-   *   - pop 按 name 操作，总是弹出栈顶（最小 layer>0）
-   *   - promote 按 rid 操作，可以提升任意栈层，因为 RID 是稳定身份
    *
    * @param {string} rid - 要提升的资源 RID
    * @returns {Promise<object>} 新的活跃层资源
@@ -312,9 +309,6 @@ class ResourceService {
   /**
    * 从栈中移除指定 RID 的资源（硬删除）
    *
-   * 与旧 dropLayer 的区别：
-   *   - dropLayer 按 name+layer 定位，layer 是动态位置
-   *   - removeFromStack 按 rid 定位，RID 是稳定身份
    *
    * @param {string} rid - 要移除的资源 RID
    * @returns {Promise<object>} { rid, removed: true }
@@ -331,33 +325,6 @@ class ResourceService {
     await this.db.run('DELETE FROM resources WHERE rid = ?', [rid]);
     await this.db.run('DELETE FROM relations WHERE from_rid = ? OR to_rid = ?', [rid, rid]);
     return { rid, removed: true };
-  }
-
-  // ── 以下为向后兼容的旧方法，已废弃 ──
-
-  /**
-   * @deprecated 使用 promote(rid) 代替
-   */
-  async popFromStack(name) {
-    const stack = await this.getStack(name);
-    if (stack.length < 2) {
-      throw new Error(`资源 "${name}" 栈中没有可弹出的层`);
-    }
-    return this.promote(stack[1].rid);
-  }
-
-  /**
-   * @deprecated 使用 removeFromStack(rid) 代替
-   */
-  async dropLayer(name, layer) {
-    if (layer === 0) {
-      throw new Error('不能丢弃活跃层（layer=0），请先 promote 或 delete');
-    }
-    const resource = await this.getByNameLayer(name, layer);
-    if (!resource) {
-      throw new Error(`资源 "${name}" 的 layer ${layer} 不存在`);
-    }
-    return this.removeFromStack(resource.rid);
   }
 
   async getByPath(filePath) {
