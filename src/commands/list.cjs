@@ -3,7 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
+
 const ResourceType = require('../utils/resourceType.cjs');
 const HashUtils = require('../utils/hash.cjs');
 
@@ -26,7 +26,7 @@ module.exports = async function list(argv) {
     const repo = new Repository(repoPath);
     await repo.open();
 
-    const staging = new StagingArea(repoPath);
+    const staging = repo.staging;
     const stagingStatus = await staging.getStatus();
     const resourcesDir = path.join(repoPath, 'resources');
 

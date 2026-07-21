@@ -1,7 +1,7 @@
 const chalk = require('chalk');
 const path = require('path');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
+
 
 async function reset(argv) {
   const repoPath = process.cwd();
@@ -10,7 +10,7 @@ async function reset(argv) {
   const repo = new Repository(repoPath);
   await repo.open();
   
-  const staging = new StagingArea(repoPath);
+  const staging = repo.staging;
   
   if (!targetPath || targetPath === 'HEAD') {
     await staging.reset();

@@ -2,7 +2,7 @@ const chalk = require('chalk');
 const fs = require('fs-extra');
 const path = require('path');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
+
 const HashUtils = require('../utils/hash.cjs');
 
 async function diff(argv) {
@@ -12,7 +12,7 @@ async function diff(argv) {
   const repo = new Repository(repoPath);
   await repo.open();
 
-  const staging = new StagingArea(repoPath);
+  const staging = repo.staging;
   const stagingStatus = await staging.getStatus();
 
   // 暂存区变更

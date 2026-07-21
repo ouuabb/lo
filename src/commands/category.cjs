@@ -1,7 +1,7 @@
 const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
+
 
 /**
  * 从层级路径中提取根分类（第一级）
@@ -113,7 +113,7 @@ module.exports = async function category(argv) {
       process.exit(1);
     }
 
-    const staging = new StagingArea(repo.repoPath);
+    const staging = repo.staging;
     const stagingStatus = await staging.getStatus();
 
     switch (action) {

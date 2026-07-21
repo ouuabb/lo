@@ -2,7 +2,7 @@ const chalk = require('chalk');
 const fs = require('fs-extra');
 const path = require('path');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
+
 
 async function add(argv) {
   const repoPath = process.cwd();
@@ -11,7 +11,7 @@ async function add(argv) {
   const repo = new Repository(repoPath);
   await repo.open();
 
-  const staging = new StagingArea(repoPath);
+  const staging = repo.staging;
 
   if (!targetPath || targetPath === '.') {
     const count = await staging.addAll(repo);

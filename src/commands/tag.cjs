@@ -1,7 +1,7 @@
 const path = require('path');
 const Logger = require('../utils/logger.cjs');
 const Repository = require('../repo/repository.cjs');
-const StagingArea = require('../repo/staging.cjs');
+
 
 module.exports = async function tag(argv) {
   const { action, rid, tag } = argv;
@@ -19,7 +19,7 @@ module.exports = async function tag(argv) {
       process.exit(1);
     }
 
-    const staging = new StagingArea(repo.repoPath);
+    const staging = repo.staging;
     const stagingStatus = await staging.getStatus();
 
     switch (action) {
