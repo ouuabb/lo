@@ -5,3 +5,6 @@ backups/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 admin/dist/
+coverage/
+.nyc_output/
+npm-debug.log*

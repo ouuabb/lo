@@ -16,13 +16,14 @@ class Scanner {
     const patterns = allDirs.map(d => `${d}/**/*.md`);
     const ignore = ['**/node_modules/**', '**/.git/**'];
 
-    const files = glob.sync(`{${patterns.join(',')}}`, {
+    const pattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(',')}}`;
+    const files = glob.sync(pattern, {
       cwd: this.rootDir,
       ignore,
       absolute: true
     });
 
-    const notes = files
+    let notes = files
       .map(file => {
         try {
           const content = fs.readFileSync(file, 'utf-8');

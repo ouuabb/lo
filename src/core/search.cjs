@@ -8,6 +8,7 @@ class SearchEngine {
   }
 
   search(query, options = {}) {
+    if (!query || !query.trim()) return [];
     const notes = this.scanner.scan();
 
     const searchable = notes.map(note => ({
