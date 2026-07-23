@@ -34,6 +34,7 @@ module.exports = async function files(argv) {
       Logger.info('暂无文件（resources 目录不存在）');
       await repo.close();
       process.exit(0);
+      return;
     }
 
     const dbResources = await repo.resourceService.getAll({ activeOnly: true, type });
@@ -166,11 +167,13 @@ module.exports = async function files(argv) {
     if (display.length === 0) {
       Logger.info('暂无文件');
       process.exit(0);
+      return;
     }
 
     if (format === 'json') {
       console.log(JSON.stringify(display, null, 2));
       process.exit(0);
+      return;
     }
 
     const getStatusLabel = (s) => {

@@ -177,11 +177,13 @@ module.exports = async function list(argv) {
     if (display.length === 0) {
       Logger.info('暂无资源');
       process.exit(0);
+      return;
     }
 
     if (format === 'json') {
       console.log(JSON.stringify(display, null, 2));
       process.exit(0);
+      return;
     }
 
     const getStatusLabel = (s) => {

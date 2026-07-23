@@ -31,6 +31,7 @@ module.exports = async function deleteResource(argv) {
           if (answer.toLowerCase() !== 'y') {
             Logger.info('已取消删除');
             process.exit(0);
+            return;
           }
           resolve();
         });

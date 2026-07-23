@@ -78,6 +78,7 @@ module.exports = async function category(argv) {
         printTree(tree);
       }
       process.exit(0);
+      return;
     }
 
     // === 列出所有分类（扁平） ===
@@ -97,6 +98,7 @@ module.exports = async function category(argv) {
         }
       }
       process.exit(0);
+      return;
     }
 
     if (!rid) {

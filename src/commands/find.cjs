@@ -25,6 +25,7 @@ module.exports = async function find(argv) {
     if (filtered.length === 0) {
       Logger.info(`未找到匹配 "${query}" 的资源`);
       process.exit(0);
+      return;
     }
 
     Logger.title(`搜索结果: "${query}" (共 ${filtered.length} 个)`);
