@@ -20,17 +20,20 @@ graph LR
 ### 第一阶段：初始化仓库
 
 ```bash
-# 创建笔记目录并初始化 lo 仓库
+# 创建笔记目录并初始化 lo 仓库（默认明文）
 mkdir ~/my-notes
 cd ~/my-notes
 lo init
 
-# （推荐）启用加密保护
+# 可选：需要全仓库加密时
+lo init --encrypt
+
+# （推荐）如果需要加密密钥保护
 ssh-keygen -t ed25519 -C "lo-notes"   # 如果没有 SSH 密钥
 lo auth add -k ~/.ssh/id_ed25519 -l "我的电脑"
 ```
 
-> 建议在 `lo init` 后立即执行 `lo auth add`，确保从一开始笔记就以加密格式存储。
+> 默认明文模式，文件可直接编辑。笔记写好后如需加密，用 `lo encrypt <rid>` 或 `lo encrypt --all` 随时加密。
 
 ### 第二阶段：创建内容
 

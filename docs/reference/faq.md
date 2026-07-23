@@ -26,7 +26,7 @@ A: SSH 私钥密码对 lo 没有影响（lo 读取的是私钥文件原始字节
 
 **Q: 可以在没有 SSH 密钥的情况下使用加密吗？**
 
-A: 可以。`lo init` 后 RepoKey 以明文存储，笔记会自动加密。`lo auth add` 是可选的增强步骤，建议使用但非强制。
+A: 可以。`lo init` 后 RepoKey 以明文存储。默认文件是明文，但可以用 `lo encrypt <rid>` 或 `lo new --encrypt` 加密指定文件。如需全局加密，用 `lo init --encrypt` 或 `lo encrypt --all`。`lo auth add` 是可选的增强步骤。
 
 **Q: 如何备份密钥？**
 

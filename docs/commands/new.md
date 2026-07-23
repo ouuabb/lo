@@ -1,6 +1,6 @@
 ## new — 创建新资源
 
-**用法:** `lo new <标题> [--type <类型>] [--tags <标签>] [--category <分类>]`
+**用法:** `lo new <标题> [--type <类型>] [--tags <标签>] [--category <分类>] [--encrypt]`
 
 创建新的资源文件（不入库，入库在 lo add + lo commit 时完成）。
 
@@ -12,7 +12,7 @@
 
 **存储位置:** resources/ 目录
 
-**加密行为:** 如果仓库已启用加密，文件自动以 LOEC 格式加密存储
+**加密行为:** 默认明文创建，文件可直接编辑。使用 `--encrypt` 选项加密当前文件；全仓库加密模式（`lo init --encrypt`）下自动加密。
 
 **默认分类:**
 - 笔记类型（note）自动归入默认分类，默认为 "未分类"
@@ -27,11 +27,13 @@
 | `--type` | 资源类型（默认: note），可选: note, pdf, image, video, audio, html, text |
 | `--tags` | 标签，多个标签用逗号分隔 |
 | `--category` | 分类名，支持多级路径如 编程/Python/爬虫 |
+| `--encrypt` | 加密当前文件（默认为明文创建） |
 
 ### 示例
 
 ```bash
-lo new "理解闭包"                                # 创建笔记（自动"未分类"）
+lo new "理解闭包"                                # 明文笔记（默认）
+lo new "密码清单" --encrypt                       # 加密笔记
 lo new "架构图" --type image                     # 创建图片（自动"其他资源"）
 lo new "React笔记" --tags "前端,React"            # 带标签
 lo new "爬虫技巧" --category 编程/Python/爬虫     # 多级分类

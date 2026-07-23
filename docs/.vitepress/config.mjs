@@ -99,6 +99,8 @@ export default withMermaid({
             { text: 'files — 列出文件', link: '/commands/files' },
             { text: 'show — 查看资源', link: '/commands/show' },
             { text: 'edit — 编辑资源', link: '/commands/edit' },
+            { text: 'encrypt — 加密资源', link: '/commands/encrypt' },
+            { text: 'decrypt — 解密资源', link: '/commands/decrypt' },
             { text: 'delete — 删除资源', link: '/commands/delete' },
             { text: 'add — 添加到暂存区', link: '/commands/add' },
             { text: 'commit — 提交暂存区', link: '/commands/commit' },

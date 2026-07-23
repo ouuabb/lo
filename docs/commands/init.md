@@ -1,6 +1,6 @@
 ## init — 初始化资源仓库
 
-**用法:** `lo init [--path <路径>]`
+**用法:** `lo init [--path <路径>] [--encrypt]`
 
 在指定目录创建资源仓库结构。
 
@@ -12,26 +12,35 @@
 5. 生成 AES-256-GCM 加密密钥（.repo/keys/repo.key）
 6. 创建 .note/config.json 用户配置文件
 
+**加密模式**: 默认明文，文件可直接编辑。使用 `--encrypt` 开启全仓库加密。
+
 ### 选项
 
 | 选项 | 说明 |
 |------|------|
 | `--path` | 仓库根目录路径（默认: 当前工作目录） |
+| `--encrypt` | 启用全仓库加密，所有文件落盘即 LOEC 密文（默认: false） |
 
 ### 示例
 
 ```bash
-lo init                     # 在当前目录初始化
-lo init --path ~/notes     # 在指定目录初始化
+lo init                     # 明文仓库，文件可直接编辑
+lo init --encrypt           # 加密仓库，所有文件自动加密
+lo init --path ~/notes      # 在指定目录初始化
 ```
 
 ### 注意事项
 
-- 如果仓库已存在，重复运行 lo init 不会覆盖已有数据
+- 加密密钥始终生成，无需加密时不会自动加密文件
+- 明文仓库中可随时用 `lo encrypt <rid>` 加密单个文件，用 `lo decrypt <rid>` 解密
+- 用 `lo encrypt --all` 可将明文仓库整体转为加密模式
 - 生成的加密密钥权限为 0o600（仅所有者可读写）
-- 建议初始化后立即运行 lo auth add 绑定 SSH 密钥保护
+- 密钥以明文存储时，建议运行 `lo auth add` 绑定 SSH 密钥保护
 
 ### 相关命令
 
+- [new](./new.md) — 创建新资源
+- [encrypt](./encrypt.md) — 加密资源
+- [decrypt](./decrypt.md) — 解密资源
 - [auth](./auth.md) — 绑定 SSH 密钥保护加密密钥
 - [config](./config.md) — 管理仓库配置
