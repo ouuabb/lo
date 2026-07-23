@@ -34,7 +34,7 @@ describe('RelationService', () => {
   test('should create bidirectional relation', async () => {
     const result = await relationService.createBidirectional('res_a', 'res_b', 'reference');
     
-    const forward = await relationService.getById(result.id);
+    const forward = await relationService.getById(result.a.id);
     expect(forward).not.toBeNull();
     expect(forward.from_rid).toBe('res_a');
     expect(forward.to_rid).toBe('res_b');
@@ -73,7 +73,7 @@ describe('RelationService', () => {
     await relationService.create('res_a', 'res_c', 'reference');
     await relationService.create('res_b', 'res_c', 'reference');
 
-    const outgoing = await relationService.getOutgoing('res_a');
+    const outgoing = await relationService.getByFromRid('res_a');
     expect(outgoing.length).toBe(2);
   });
 
@@ -82,7 +82,7 @@ describe('RelationService', () => {
     await relationService.create('res_c', 'res_b', 'reference');
     await relationService.create('res_b', 'res_d', 'reference');
 
-    const incoming = await relationService.getIncoming('res_b');
+    const incoming = await relationService.getByToRid('res_b');
     expect(incoming.length).toBe(2);
   });
 
@@ -98,7 +98,7 @@ describe('RelationService', () => {
   test('should remove relation by ID', async () => {
     const created = await relationService.create('res_a', 'res_b', 'reference');
     
-    await relationService.removeById(created.id);
+    await relationService.remove(created.id);
     
     const relations = await relationService.listAll();
     expect(relations.length).toBe(0);
@@ -107,7 +107,7 @@ describe('RelationService', () => {
   test('should update relation', async () => {
     const created = await relationService.create('res_a', 'res_b', 'reference', { weight: 1 });
     
-    const updated = await relationService.update(created.id, { weight: 2, note: 'updated' });
+    const updated = await relationService.update(created.id, { metadata: { weight: 2, note: 'updated' } });
     
     expect(updated.metadata.weight).toBe(2);
     expect(updated.metadata.note).toBe('updated');

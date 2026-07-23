@@ -1,61 +1,54 @@
-const fs = require('fs-extra');
+/**
+ * reset 命令测试（新架构）
+ *
+ * reset 命令取消暂存，新架构下通过 argv._[1] 获取文件路径。
+ */
+
 const path = require('path');
+const { setupTempRepo, teardownTempRepo, createTestFile, Repository } = require('./commandTestHelper.cjs');
 const resetCommand = require('../../src/commands/reset.cjs');
-const Repository = require('../../src/repo/repository.cjs');
+const addCommand = require('../../src/commands/add.cjs');
 
 describe('reset command', () => {
-  let tempDir;
+  let ctx;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(require('os').tmpdir(), 'lo-test-reset-'));
-    await fs.ensureDir(path.join(tempDir, '.repo'));
+    ctx = await setupTempRepo();
   });
 
   afterEach(async () => {
-    if (tempDir && await fs.pathExists(tempDir)) {
-      await fs.remove(tempDir);
-    }
+    await teardownTempRepo(ctx);
   });
 
-  test('should reset staging area', async () => {
-    const filePath = path.join(tempDir, 'test.md');
-    await fs.writeFile(filePath, '# Test');
+  test('should unstage a file', async () => {
+    await createTestFile(path.join(ctx.tempDir, 'test.md'), '# Test');
+    await addCommand({ _: ['lo', 'test.md'] });
 
-    const repo = new Repository(tempDir);
+    // 重置暂存
+    await expect(resetCommand({ _: ['lo', 'test.md'] })).resolves.toBeUndefined();
+
+    // 验证暂存区已清空
+    const repo = new Repository(ctx.tempDir);
     await repo.init();
-    await repo.staging.add(filePath);
+    const status = await repo.staging.getStatus();
     await repo.close();
 
-    await resetCommand.run(tempDir);
-
-    const repo2 = new Repository(tempDir);
-    await repo2.open({ skipAuth: true });
-    const status = await repo2.staging.getStatus();
-    await repo2.close();
-
-    expect(status.added).toEqual([]);
-    expect(status.modified).toEqual([]);
-    expect(status.deleted).toEqual([]);
+    expect(status.added).not.toContain('test.md');
   });
 
-  test('should reset specific file', async () => {
-    await fs.writeFile(path.join(tempDir, 'file1.md'), '# File 1');
-    await fs.writeFile(path.join(tempDir, 'file2.md'), '# File 2');
+  test('should unstage all files', async () => {
+    await createTestFile(path.join(ctx.tempDir, 'file1.md'), '# File 1');
+    await createTestFile(path.join(ctx.tempDir, 'file2.md'), '# File 2');
+    await addCommand({ _: ['lo'] });
 
-    const repo = new Repository(tempDir);
+    // 不指定文件 → 重置全部
+    await expect(resetCommand({ _: ['lo'] })).resolves.toBeUndefined();
+
+    const repo = new Repository(ctx.tempDir);
     await repo.init();
-    await repo.staging.add(path.join(tempDir, 'file1.md'));
-    await repo.staging.add(path.join(tempDir, 'file2.md'));
+    const status = await repo.staging.getStatus();
     await repo.close();
 
-    await resetCommand.run(tempDir, { files: ['file1.md'] });
-
-    const repo2 = new Repository(tempDir);
-    await repo2.open({ skipAuth: true });
-    const status = await repo2.staging.getStatus();
-    await repo2.close();
-
-    expect(status.added.length).toBe(1);
-    expect(status.added[0]).toBe('file2.md');
+    expect(status.added.length).toBe(0);
   });
 });

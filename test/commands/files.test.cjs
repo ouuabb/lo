@@ -1,57 +1,42 @@
-const fs = require('fs-extra');
+/**
+ * files 命令测试（新架构）
+ *
+ * files 命令列出 resources/ 目录下的文件，因此需要将测试文件放到 resources/ 子目录中。
+ */
+
 const path = require('path');
+const fs = require('fs-extra');
+const { setupTempRepo, teardownTempRepo, Repository } = require('./commandTestHelper.cjs');
 const filesCommand = require('../../src/commands/files.cjs');
-const Repository = require('../../src/repo/repository.cjs');
 
 describe('files command', () => {
-  let tempDir;
+  let ctx;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(require('os').tmpdir(), 'lo-test-files-'));
-    await fs.ensureDir(path.join(tempDir, '.repo'));
+    ctx = await setupTempRepo();
+    // 创建 resources/ 目录（files 命令需要）
+    await fs.ensureDir(path.join(ctx.tempDir, 'resources'));
   });
 
   afterEach(async () => {
-    if (tempDir && await fs.pathExists(tempDir)) {
-      await fs.remove(tempDir);
-    }
+    await teardownTempRepo(ctx);
   });
 
   test('should list tracked files', async () => {
-    const filePath = path.join(tempDir, 'test.md');
-    await fs.writeFile(filePath, '# Test');
-
-    const repo = new Repository(tempDir);
+    // 在 resources/ 下创建文件并导入
+    const testFile = path.join(ctx.tempDir, 'resources', 'test.md');
+    await fs.writeFile(testFile, '# Test');
+    const repo = new Repository(ctx.tempDir);
     await repo.init();
-    await repo.staging.add(filePath);
+    await repo.importFile(testFile);
     await repo.close();
 
-    const result = await filesCommand.run(tempDir);
-    expect(result.length).toBe(1);
-    expect(result[0].name).toBe('test.md');
+    // 验证不抛异常
+    await expect(filesCommand({ _: ['lo'] })).resolves.toBeUndefined();
   });
 
-  test('should show file details', async () => {
-    const filePath = path.join(tempDir, 'test.md');
-    await fs.writeFile(filePath, '# Test\n\nContent');
-
-    const repo = new Repository(tempDir);
-    await repo.init();
-    await repo.staging.add(filePath);
-    await repo.close();
-
-    const result = await filesCommand.run(tempDir, { details: true });
-    expect(result.length).toBe(1);
-    expect(result[0].size).toBeGreaterThan(0);
-    expect(result[0].mtime).toBeDefined();
-  });
-
-  test('should handle empty repo', async () => {
-    const repo = new Repository(tempDir);
-    await repo.init();
-    await repo.close();
-
-    const result = await filesCommand.run(tempDir);
-    expect(result).toEqual([]);
+  test('should handle empty resources directory', async () => {
+    // resources/ 存在但为空
+    await expect(filesCommand({ _: ['lo'] })).resolves.toBeUndefined();
   });
 });

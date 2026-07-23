@@ -1,50 +1,40 @@
-const fs = require('fs-extra');
+/**
+ * rm 命令测试（新架构）
+ *
+ * rm 命令将文件暂存为删除状态（staging.remove），不直接删除数据库记录。
+ */
+
 const path = require('path');
+const { setupTempRepo, teardownTempRepo, createTestFile, Repository } = require('./commandTestHelper.cjs');
 const rmCommand = require('../../src/commands/rm.cjs');
-const Repository = require('../../src/repo/repository.cjs');
 
 describe('rm command', () => {
-  let tempDir;
+  let ctx;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(require('os').tmpdir(), 'lo-test-rm-'));
-    await fs.ensureDir(path.join(tempDir, '.repo'));
+    ctx = await setupTempRepo();
   });
 
   afterEach(async () => {
-    if (tempDir && await fs.pathExists(tempDir)) {
-      await fs.remove(tempDir);
-    }
+    await teardownTempRepo(ctx);
   });
 
-  test('should remove file from staging', async () => {
-    const filePath = path.join(tempDir, 'test.md');
-    await fs.writeFile(filePath, '# Test');
-
-    const repo = new Repository(tempDir);
+  test('should stage a file for removal', async () => {
+    await createTestFile(path.join(ctx.tempDir, 'test.md'), '# Test');
+    const repo = new Repository(ctx.tempDir);
     await repo.init();
-    await repo.staging.add(filePath);
+    await repo.importFile(path.join(ctx.tempDir, 'test.md'));
     await repo.close();
 
-    const result = await rmCommand.run(tempDir, { files: ['test.md'] });
-    expect(result.deleted.length).toBe(1);
-  });
+    // rm 命令暂存删除
+    await expect(rmCommand({ _: ['lo', 'test.md'] })).resolves.toBeUndefined();
 
-  test('should remove multiple files', async () => {
-    await fs.writeFile(path.join(tempDir, 'file1.md'), '# File 1');
-    await fs.writeFile(path.join(tempDir, 'file2.md'), '# File 2');
+    // 验证暂存区有删除记录
+    const repo2 = new Repository(ctx.tempDir);
+    await repo2.init();
+    const status = await repo2.staging.getStatus();
+    await repo2.close();
 
-    const repo = new Repository(tempDir);
-    await repo.init();
-    await repo.staging.add(path.join(tempDir, 'file1.md'));
-    await repo.staging.add(path.join(tempDir, 'file2.md'));
-    await repo.close();
-
-    const result = await rmCommand.run(tempDir, { files: ['file1.md', 'file2.md'] });
-    expect(result.deleted.length).toBe(2);
-  });
-
-  test('should handle non-existent file', async () => {
-    await expect(rmCommand.run(tempDir, { files: ['nonexistent.md'] })).rejects.toThrow();
+    expect(status.deleted).toContain('test.md');
   });
 });

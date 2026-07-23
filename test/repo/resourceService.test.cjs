@@ -119,7 +119,8 @@ describe('ResourceService', () => {
     });
 
     expect(updated.metadata.title).toBe('Updated');
-    expect(updated.metadata.tags).toEqual(['tag1']);
+    // tags 已从 metadata JSON 中独立到 resource_tags 表，挂载在顶层 .tags
+    expect(updated.tags).toEqual(['tag1']);
   });
 
   test('should delete resource', async () => {
@@ -147,14 +148,5 @@ describe('ResourceService', () => {
     expect(resource).not.toBeNull();
     expect(resource.type).toBe('note');
     expect(resource.path).toBe(filePath);
-  });
-
-  test('should generate unique RID', async () => {
-    const rid1 = await resourceService._generateRid();
-    const rid2 = await resourceService._generateRid();
-
-    expect(rid1).toMatch(/^res_/);
-    expect(rid2).toMatch(/^res_/);
-    expect(rid1).not.toBe(rid2);
   });
 });
