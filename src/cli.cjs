@@ -45,6 +45,8 @@ const stack = require('./commands/stack.cjs');
 const rm = require('./commands/rm.cjs');
 const createResourceCmd = require('./commands/resource.cjs');
 const containerCmd = require('./commands/container.cjs');
+const encrypt = require('./commands/encrypt.cjs');
+const decrypt = require('./commands/decrypt.cjs');
 
 const cli = yargs
   .scriptName('lo')
@@ -69,6 +71,11 @@ cli
         type: 'string',
         description: '初始化路径',
         default: process.cwd()
+      })
+      .option('encrypt', {
+        type: 'boolean',
+        description: '启用全仓库加密（文件落盘即密文）',
+        default: false
       });
   }, init)
 
@@ -111,6 +118,11 @@ cli
       .option('category', {
         type: 'string',
         description: '分类目录'
+      })
+      .option('encrypt', {
+        type: 'boolean',
+        description: '加密此文件',
+        default: false
       });
   }, newResource)
 
@@ -218,6 +230,32 @@ cli
         default: false
       });
   }, deleteResource)
+
+  .command('encrypt [rid]', '加密资源（单文件或全部）', (yargs) => {
+    yargs
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID（不指定时需配合 --all）'
+      })
+      .option('all', {
+        type: 'boolean',
+        description: '加密所有未加密的文件',
+        default: false
+      });
+  }, encrypt)
+
+  .command('decrypt [rid]', '解密资源（单文件或全部）', (yargs) => {
+    yargs
+      .positional('rid', {
+        type: 'string',
+        description: '资源 RID（不指定时需配合 --all）'
+      })
+      .option('all', {
+        type: 'boolean',
+        description: '解密所有已加密的文件',
+        default: false
+      });
+  }, decrypt)
 
   .command('index', '生成索引', {}, index)
 

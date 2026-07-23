@@ -500,7 +500,9 @@ route('PUT', '/api/notes/:rid', async (req, res, { repo, url }) => {
       const filePath = path.resolve(resource.path);
       const rawContent = typeof content === 'string' ? content : JSON.stringify(content);
 
-      if (repo.cryptoKey) {
+      // 保持文件的加密状态不变（已加密的继续加密，明文的保持明文）
+      const wasEncrypted = resource.encrypted;
+      if (repo.cryptoKey && wasEncrypted) {
         const encrypted = CryptoUtils.encryptFile(Buffer.from(rawContent, 'utf-8'), repo.cryptoKey);
         await fs.writeFile(filePath, encrypted);
       } else {

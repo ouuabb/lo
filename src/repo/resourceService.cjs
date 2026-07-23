@@ -8,12 +8,14 @@ const path = require('path');
 class ResourceService {
   /**
    * @param {import('./database.cjs')} db
-   * @param {{ getCryptoKey?: () => Buffer|null }} options
+   * @param {{ getCryptoKey?: () => Buffer|null, isEncryptByDefault?: () => boolean }} options
    */
   constructor(db, options = {}) {
     this.db = db;
     /** 懒加载加密密钥获取函数（仅内存中存在） */
     this._getCryptoKey = options.getCryptoKey || null;
+    /** 是否默认加密新文件（从仓库配置读取） */
+    this._isEncryptByDefault = options.isEncryptByDefault || (() => false);
   }
 
   /**
@@ -48,23 +50,24 @@ class ResourceService {
   }
 
   /**
-   * 写入文件内容（自动加密）
+   * 写入文件内容（根据加密策略决定是否加密）
    * @param {string} filePath
    * @param {Buffer|string} data
+   * @param {{ encrypt?: boolean }} [opts] - encrypt=true 强制加密，未指定时使用仓库默认策略
    */
-  async _writeFile(filePath, data) {
+  async _writeFile(filePath, data, opts = {}) {
     const CryptoUtils = require('../utils/crypto.cjs');
     const key = this._cryptoKey;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf-8');
+    const shouldEncrypt = opts.encrypt === true ||
+      (opts.encrypt !== false && this._isEncryptByDefault());
 
     await fs.ensureDir(path.dirname(filePath));
 
-    if (key) {
-      // 有加密密钥 → 加密写入
+    if (key && shouldEncrypt) {
       const encrypted = CryptoUtils.encryptFile(buf, key);
       await fs.writeFile(filePath, encrypted);
     } else {
-      // 无加密密钥 → 明文写入
       await fs.writeFile(filePath, buf);
     }
   }
@@ -142,8 +145,8 @@ class ResourceService {
         plainHash = HashUtils.fromBuffer(plaintext);
       } else {
         plainHash = HashUtils.fromBuffer(contentBuffer);
-        // 如果有加密密钥可用且文件未加密，则加密
-        if (this._cryptoKey) {
+        // 仅在全仓库加密模式下才自动加密未加密文件
+        if (this._cryptoKey && this._isEncryptByDefault()) {
           await CryptoUtils.writeEncryptedFile(filePath, contentBuffer, this._cryptoKey);
         }
       }
@@ -154,7 +157,7 @@ class ResourceService {
       throw new Error(`非法的 preRid: ${preRid}，必须匹配 res_ 格式`);
     }
     const rid = preRid || RidUtils.generate();
-    const encrypted = alreadyEncrypted || !!this._cryptoKey;
+    const encrypted = alreadyEncrypted || (!!this._cryptoKey && this._isEncryptByDefault());
 
     const cleanMeta = { ...metadata }; delete cleanMeta.tags;
     await this.db.run('SAVEPOINT tx_create');

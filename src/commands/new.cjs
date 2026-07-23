@@ -8,7 +8,7 @@ const CryptoUtils = require('../utils/crypto.cjs');
 const Repository = require('../repo/repository.cjs');
 
 module.exports = async function newResource(argv) {
-  const { title, type = 'note', tags, category } = argv;
+  const { title, type = 'note', tags, category, encrypt } = argv;
 
   try {
     const slug = StringUtils.slugify(title);
@@ -40,18 +40,22 @@ module.exports = async function newResource(argv) {
     const filePath = path.join(process.cwd(), 'resources', filename);
     await fs.ensureDir(path.dirname(filePath));
 
-    // 写入文件（自动处理加密）
+    // 决定是否加密：--encrypt 显式指定 > 仓库默认策略
+    const shouldEncrypt = encrypt === true || repo.isEncryptByDefault;
     const cryptoKey = repo.cryptoKey;
     const encryptionEnabled = CryptoUtils.isEncryptionEnabled(process.cwd());
 
-    if (cryptoKey) {
+    if (shouldEncrypt && cryptoKey) {
       await CryptoUtils.writeEncryptedFile(filePath, Buffer.from(content, 'utf-8'), cryptoKey);
       Logger.success(`资源已创建 (加密): ${filename}`);
-    } else if (encryptionEnabled) {
-      Logger.error('仓库启用了加密但无法获取密钥。如果是首次设置，请确保密钥已生成；如果已绑定 SSH，请确保私钥可用。');
-      Logger.info(`文件将在您完成认证后通过 lo sync 加密`);
+    } else if (encrypt && !cryptoKey) {
+      Logger.error('无法加密：加密密钥未加载。请确认仓库已初始化加密或已完成 SSH 认证。');
+      Logger.info(`文件将以明文创建: ${filename}`);
       await fs.writeFile(filePath, content);
-      Logger.warn(`资源以明文创建（待加密）: ${filename}`);
+    } else if (shouldEncrypt && !cryptoKey && encryptionEnabled) {
+      Logger.warn('仓库启用了加密但无法获取密钥。请确保已通过 SSH 认证。');
+      Logger.info(`文件将在认证后通过 lo sync 加密`);
+      await fs.writeFile(filePath, content);
     } else {
       await fs.writeFile(filePath, content);
       Logger.success(`资源已创建: ${filename}`);

@@ -97,6 +97,8 @@ class Repository {
     this.syncConfigService = null;
     /** @type {Buffer|null} 解密后的仓库加密密钥（仅存在于内存中） */
     this._cryptoKey = null;
+    /** @type {boolean} 是否默认加密新文件 */
+    this._encryptByDefault = false;
   }
 
   async init() {
@@ -104,7 +106,8 @@ class Repository {
     await this.db.init();
     
     this.resourceService = new ResourceService(this.db, {
-      getCryptoKey: () => this._cryptoKey
+      getCryptoKey: () => this._cryptoKey,
+      isEncryptByDefault: () => this._encryptByDefault
     });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
@@ -129,7 +132,8 @@ class Repository {
     await this.db.init();
     
     this.resourceService = new ResourceService(this.db, {
-      getCryptoKey: () => this._cryptoKey
+      getCryptoKey: () => this._cryptoKey,
+      isEncryptByDefault: () => this._encryptByDefault
     });
     this.relationService = new RelationService(this.db);
     this.queryEngine = new QueryEngine(this.db);
@@ -156,6 +160,9 @@ class Repository {
 
     // 加载加密密钥到内存
     await this._loadCryptoKey({ skipAuth });
+
+    // 加载加密策略配置
+    await this._loadEncryptConfig();
     
     return this;
   }
@@ -243,6 +250,27 @@ class Repository {
       Logger.warn('建议运行 lo auth add 使用 SSH 密钥保护仓库密钥');
       this._cryptoKey = repoKey;
     }
+  }
+
+  /**
+   * 加载加密策略配置到内存
+   * 读取 crypto.encryptByDefault 决定新文件是否自动加密
+   */
+  async _loadEncryptConfig() {
+    try {
+      const val = await this.getConfig('crypto.encryptByDefault');
+      this._encryptByDefault = val === true || val === 'true';
+    } catch {
+      this._encryptByDefault = false;
+    }
+  }
+
+  /**
+   * 当前仓库是否默认加密新文件
+   * @returns {boolean}
+   */
+  get isEncryptByDefault() {
+    return this._encryptByDefault;
   }
 
   /**
@@ -389,9 +417,9 @@ class Repository {
     
     await fs.ensureDir(path.dirname(filePath));
 
-    // 使用 ResourceService 的统一写入方法（自动处理加密）
+    // 使用 ResourceService 的统一写入方法（根据加密策略决定是否加密）
     const contentBuf = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf-8');
-    if (this._cryptoKey) {
+    if (this._cryptoKey && this._encryptByDefault) {
       await CryptoUtils.writeEncryptedFile(filePath, contentBuf, this._cryptoKey);
     } else {
       await fs.writeFile(filePath, contentBuf);
