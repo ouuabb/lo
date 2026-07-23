@@ -157,7 +157,8 @@ export default withMermaid({
           items: [
             { text: '术语表', link: '/reference/glossary' },
             { text: '常见问题', link: '/reference/faq' },
-            { text: 'HTTP API', link: '/reference/api' }
+            { text: 'HTTP API', link: '/reference/api' },
+            { text: '测试与 Jest', link: '/reference/jest-testing' }
           ]
         }
       ],
