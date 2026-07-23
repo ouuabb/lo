@@ -14,9 +14,10 @@ const Repository = require('../../src/repo/repository.cjs');
 
 /**
  * 创建临时测试仓库并切换工作目录
+ * @param {{ withCrypto?: boolean }} [opts] - withCrypto=true 时生成加密密钥
  * @returns {{ tempDir: string, originalCwd: string }} 测试目录和原始目录
  */
-async function setupTempRepo() {
+async function setupTempRepo(opts = {}) {
   const originalCwd = process.cwd();
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lo-test-'));
   await fs.ensureDir(path.join(tempDir, '.repo'));
@@ -24,6 +25,13 @@ async function setupTempRepo() {
   // 初始化仓库
   const repo = new Repository(tempDir);
   await repo.init();
+
+  // 如果需要，生成加密密钥
+  if (opts.withCrypto) {
+    const CryptoUtils = require('../../src/utils/crypto.cjs');
+    CryptoUtils.initRepoKey(tempDir);
+  }
+
   await repo.close();
 
   // mock process.exit 防止命令终止测试
