@@ -60,7 +60,7 @@ class CollaborationEngine {
         strategy: 'pipeline'
       });
       this.teamRegistry.register(researchTeam);
-    } catch {}
+    } catch (e) { console.error('collaborationEngine: register builtin teams failed', e); }
   }
 
   /** 创建团队 */
@@ -77,7 +77,7 @@ class CollaborationEngine {
     if (this.eventBus) {
       try {
         this.eventBus.emit({ type: 'team.created', payload: { id: team.id } });
-      } catch {}
+      } catch (e) { console.error('collaborationEngine: team created event emit failed', e); }
     }
 
     return team;
@@ -114,7 +114,7 @@ class CollaborationEngine {
     if (this.eventBus) {
       try {
         this.eventBus.emit({ type: 'task.created', payload: { id: task.id, teamId, goal } });
-      } catch {}
+      } catch (e) { console.error('collaborationEngine: task created event emit failed', e); }
     }
 
     return task;
@@ -167,7 +167,7 @@ class CollaborationEngine {
             type: 'task.assigned',
             payload: { taskId: task.id, agentId: subtask.assignedAgent, goal: subtask.goal }
           });
-        } catch {}
+        } catch (e) { console.error('collaborationEngine: task assigned event emit failed', e); }
       }
 
       // 如果 agentEngine 存在，执行代理
@@ -216,7 +216,7 @@ class CollaborationEngine {
           type: 'collaboration.completed',
           payload: { teamId, goal, status: task.status }
         });
-      } catch {}
+      } catch (e) { console.error('collaborationEngine: task completed event emit failed', e); }
     }
 
     return task.toJSON();
@@ -234,7 +234,7 @@ class CollaborationEngine {
       if (team.strategy === 'broadcast') {
         try {
           await this.executeTeam(info.id, `handle_${eventType}`);
-        } catch {}
+        } catch (e) { console.error('collaborationEngine: broadcast team execution failed', e); }
       }
     }
   }

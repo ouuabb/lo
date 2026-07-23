@@ -39,7 +39,7 @@ class AIGateway {
     if (this.eventBus) {
       try {
         await this.eventBus.emit({ type: 'ai.request.created', payload: { id: req.id, mode: req.mode }, source: 'ai' });
-      } catch {}
+      } catch (e) { console.error('aiGateway: request created event emit failed', e); }
     }
 
     // 1. Reasoning
@@ -53,7 +53,7 @@ class AIGateway {
     if (this.eventBus) {
       try {
         await this.eventBus.emit({ type: 'ai.reasoning.completed', payload: { requestId: req.id }, source: 'ai' });
-      } catch {}
+      } catch (e) { console.error('aiGateway: reasoning completed event emit failed', e); }
     }
 
     // 2. Plan
@@ -67,7 +67,7 @@ class AIGateway {
     if (this.eventBus) {
       try {
         await this.eventBus.emit({ type: 'ai.plan.created', payload: { requestId: req.id, stepCount: plan.length }, source: 'ai' });
-      } catch {}
+      } catch (e) { console.error('aiGateway: plan created event emit failed', e); }
     }
 
     // 3. Execute
@@ -82,7 +82,7 @@ class AIGateway {
       if (this.eventBus) {
         try {
           await this.eventBus.emit({ type: 'ai.action.executed', payload: r, source: 'ai' });
-        } catch {}
+        } catch (e) { console.error('aiGateway: action executed event emit failed', e); }
       }
     }
 
@@ -99,7 +99,7 @@ class AIGateway {
     if (this.learningEngine) {
       try {
         await this.learningEngine.record({ request: req, reasoning: reasoningResult, plan, execution, response: resp });
-      } catch {}
+      } catch (e) { console.error('aiGateway: learning record failed', e); }
     }
 
     return resp;

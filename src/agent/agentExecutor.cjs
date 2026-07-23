@@ -72,7 +72,7 @@ class AgentExecutor {
               result.data = { type: 'graph', report };
               context.observe('graph_analyzed', report);
             }
-          } catch {}
+          } catch (e) { this.logger.error('agentExecutor: get knowledge analyzer failed', e); }
         }
 
         if (planItem.target === 'resources' || planItem.target === 'all') {
@@ -80,7 +80,7 @@ class AgentExecutor {
             const lifecycle = await this.repository.getKnowledgeLifecycle();
             result.data = { ...result.data, lifecycle };
             context.observe('resources_analyzed', lifecycle);
-          } catch {}
+          } catch (e) { this.logger.error('agentExecutor: get knowledge lifecycle failed', e); }
         }
 
         if (planItem.target === 'recommendations' || planItem.target === 'all') {
@@ -88,7 +88,7 @@ class AgentExecutor {
             const recs = await this.repository.getRecommendations();
             result.data = { ...result.data, recommendations: recs };
             context.observe('recommendations_generated', recs);
-          } catch {}
+          } catch (e) { this.logger.error('agentExecutor: get recommendations failed', e); }
         }
       } catch (e) {
         result.status = 'error';
@@ -159,7 +159,7 @@ class AgentExecutor {
           payload: { agent: context.agent ? context.agent.id : 'unknown', message: planItem.target },
           source: 'agent'
         });
-      } catch {}
+      } catch (e) { this.logger.error('agentExecutor: notification event emit failed', e); }
     }
 
     return { action: 'notify', target: planItem.target, status: 'sent' };

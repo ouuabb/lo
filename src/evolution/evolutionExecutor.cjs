@@ -45,7 +45,7 @@ class EvolutionExecutor {
             results.push({ ...step, status: 'denied', reason: 'permission' });
             continue;
           }
-        } catch {}
+        } catch (e) { this.logger.error('evolutionExecutor: permission check failed', e); }
       }
 
       const result = await this.executeStep(step);

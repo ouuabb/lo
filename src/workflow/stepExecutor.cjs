@@ -151,7 +151,7 @@ class StepExecutor {
             autoResult.lifecycle = lifecycle;
             const repair = await this.repository.runKnowledgeRepair();
             autoResult.repair = repair;
-          } catch {}
+          } catch (e) { this.logger.error('stepExecutor: run automation failed', e); }
           result.automation = autoResult;
         }
       } catch (e) {

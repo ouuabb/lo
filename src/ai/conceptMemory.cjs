@@ -94,9 +94,9 @@ class ConceptMemory {
 
   _hydrate(row) {
     let relations = [];
-    try { relations = JSON.parse(row.relations || '[]'); } catch {}
+    try { relations = JSON.parse(row.relations || '[]'); } catch (e) { console.error('conceptMemory: JSON parse relations failed', e); }
     let metadata = {};
-    try { metadata = JSON.parse(row.metadata || '{}'); } catch {}
+    try { metadata = JSON.parse(row.metadata || '{}'); } catch (e) { console.error('conceptMemory: JSON parse metadata failed', e); }
     return {
       name: row.name,
       meaning: row.meaning || '',

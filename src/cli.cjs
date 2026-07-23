@@ -1301,6 +1301,10 @@ cli
         alias: 'r',
         description: '仓库路径',
         default: process.cwd()
+      })
+      .option('admin-token', {
+        type: 'string',
+        description: 'Admin API 共享密钥（也可通过 LO_ADMIN_TOKEN 环境变量设置）'
       });
   }, serve)
 

@@ -41,7 +41,7 @@ class SystemObserver {
         const stats = await this.repository.getStats();
         snap.resources = stats.resourceCount || 0;
         snap.relations = stats.relationCount || 0;
-      } catch {}
+      } catch (e) { this.logger.error('systemObserver: get repository stats failed', e); }
     }
 
     // 孤独节点
@@ -49,21 +49,21 @@ class SystemObserver {
       try {
         const lifecycle = await this.repository.getKnowledgeLifecycle();
         snap.orphanNodes = lifecycle.forgotten || 0;
-      } catch {}
+      } catch (e) { this.logger.error('systemObserver: get lifecycle failed', e); }
     }
 
     if (this.agentEngine) {
       try {
         const agents = this.agentEngine.listAgents();
         snap.agents = agents.length;
-      } catch {}
+      } catch (e) { this.logger.error('systemObserver: get agent list failed', e); }
     }
 
     if (this.workflowEngine) {
       try {
         const workflows = this.workflowEngine.list ? this.workflowEngine.list() : [];
         snap.workflows = Array.isArray(workflows) ? workflows.length : 0;
-      } catch {}
+      } catch (e) { this.logger.error('systemObserver: get workflow list failed', e); }
     }
 
     return snap;

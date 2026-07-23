@@ -34,7 +34,7 @@ class KnowledgeReasoner {
         const stats = await this.repository.getStats();
         result.nodeCount = stats.resourceCount || 0;
         result.edgeCount = stats.relationCount || 0;
-      } catch {}
+      } catch (e) { this.logger.error('knowledgeReasoner: get repository stats failed', e); }
     }
 
     if (this.graphEngine) {
@@ -42,7 +42,7 @@ class KnowledgeReasoner {
         const graph = await this.graphEngine.build();
         result.nodeCount = graph.nodes ? graph.nodes.length : result.nodeCount;
         result.edgeCount = graph.edges ? graph.edges.length : result.edgeCount;
-      } catch {}
+      } catch (e) { this.logger.error('knowledgeReasoner: build graph failed', e); }
     }
 
     return result;
@@ -56,7 +56,7 @@ class KnowledgeReasoner {
     try {
       const recs = await this.repository.getRelationSuggestions(limit);
       return recs || [];
-    } catch { return []; }
+    } catch (e) { this.logger.error('knowledgeReasoner: relation suggestions failed', e); return []; }
   }
 
   /**
@@ -71,7 +71,7 @@ class KnowledgeReasoner {
         if (lifecycle && lifecycle.forgotten > 0) {
           gaps.push({ type: 'forgotten', count: lifecycle.forgotten, suggestion: 'Review forgotten resources' });
         }
-      } catch {}
+      } catch (e) { this.logger.error('knowledgeReasoner: knowledge lifecycle query failed', e); }
     }
 
     if (this.graphEngine) {
@@ -84,7 +84,7 @@ class KnowledgeReasoner {
         if (orphans.length > 0) {
           gaps.push({ type: 'orphan', count: orphans.length, suggestion: 'Connect orphan nodes' });
         }
-      } catch {}
+      } catch (e) { this.logger.error('knowledgeReasoner: build graph for gap detection failed', e); }
     }
 
     return gaps;

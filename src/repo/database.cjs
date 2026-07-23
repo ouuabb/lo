@@ -21,9 +21,14 @@ class Database {
         if (err) {
           reject(err);
         } else {
+          // 启用外键约束
           this.db.run('PRAGMA foreign_keys = ON', (err2) => {
-            if (err2) reject(err2);
-            else resolve(this);
+            if (err2) return reject(err2);
+            // 启用 WAL 模式：支持并发读写，防数据库损坏
+            this.db.run('PRAGMA journal_mode = WAL', (err3) => {
+              if (err3) return reject(err3);
+              resolve(this);
+            });
           });
         }
       });

@@ -79,9 +79,9 @@ class SemanticMemory {
 
   _hydrate(row) {
     let value = row.value;
-    try { value = JSON.parse(row.value); } catch {}
+    try { value = JSON.parse(row.value); } catch (e) { console.error('semanticMemory: JSON parse value failed', e); }
     let tags = [];
-    try { tags = JSON.parse(row.tags || '[]'); } catch {}
+    try { tags = JSON.parse(row.tags || '[]'); } catch (e) { console.error('semanticMemory: JSON parse tags failed', e); }
     return {
       id: row.id,
       type: row.type,

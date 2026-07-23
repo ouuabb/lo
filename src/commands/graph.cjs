@@ -458,7 +458,7 @@ async function relatedHandler(argv) {
         try {
           const resource = await repo.getResource(r.rid);
           if (resource) name = resource.name || r.rid;
-        } catch {}
+        } catch (e) { Logger.error('graph: get resource for relatedHandler failed', e); }
 
         console.log(`  ${chalk.yellow(i + 1)}.  ${chalk.cyan(r.rid)}  ${chalk.gray(name)}`);
         console.log(`       score=${r.score}  shared=${r.sharedNeighbors}  pr=${r.pageRank}`);
@@ -500,10 +500,7 @@ async function resourceBacklinksHandler(argv) {
     } else {
       for (const bl of results) {
         let name = bl.rid;
-        try {
-          const resource = await repo.getResource(bl.rid);
-          if (resource) name = resource.name || bl.rid;
-        } catch {}
+        try { const resource = await repo.getResource(bl.rid); if (resource) name = resource.name || bl.rid; } catch (e) { Logger.error('graph: get resource for backlinks failed', e); }
 
         console.log(`  ${chalk.cyan(bl.rid)}  ${chalk.gray(name)}  ${chalk.yellow('[' + bl.type + ']')}`);
       }
@@ -547,7 +544,7 @@ async function impactHandler(argv) {
         console.log(chalk.bold(`  Direct (${result.direct}):`));
         for (const d of result.directList) {
           let name = d.rid;
-          try { const r = await repo.getResource(d.rid); if (r) name = r.name || d.rid; } catch {}
+          try { const r = await repo.getResource(d.rid); if (r) name = r.name || d.rid; } catch (e) { Logger.error('graph: get resource for impact direct failed', e); }
           console.log(`    ${chalk.cyan(d.rid)}  ${chalk.gray(name)}  ${chalk.yellow('[' + d.type + ']')}`);
         }
       }
@@ -556,7 +553,7 @@ async function impactHandler(argv) {
         console.log(chalk.bold(`\n  Indirect (${result.indirect}):`));
         for (const rid of result.indirectList.slice(0, 20)) {
           let name = rid;
-          try { const r = await repo.getResource(rid); if (r) name = r.name || rid; } catch {}
+          try { const r = await repo.getResource(rid); if (r) name = r.name || rid; } catch (e) { Logger.error('graph: get resource for impact indirect failed', e); }
           console.log(`    ${chalk.cyan(rid)}  ${chalk.gray(name)}`);
         }
         if (result.indirectList.length > 20) {
@@ -679,7 +676,7 @@ async function knowledgeRecommendHandler(argv) {
       for (let i = 0; i < related.length; i++) {
         const r = related[i];
         let name = r.rid;
-        try { const resource = await repo.getResource(r.rid); if (resource) name = resource.name || r.rid; } catch {}
+        try { const resource = await repo.getResource(r.rid); if (resource) name = resource.name || r.rid; } catch (e) { Logger.error('graph: get resource for related failed', e); }
         console.log(`  ${chalk.yellow(i + 1)}. ${chalk.cyan(r.rid)}  ${chalk.gray(name)}`);
         console.log(`     ${chalk.gray(r.reason)}  score=${r.score}  rank=${r.rank}`);
       }
@@ -690,7 +687,7 @@ async function knowledgeRecommendHandler(argv) {
       for (let i = 0; i < next.length; i++) {
         const r = next[i];
         let name = r.rid;
-        try { const resource = await repo.getResource(r.rid); if (resource) name = resource.name || r.rid; } catch {}
+        try { const resource = await repo.getResource(r.rid); if (resource) name = resource.name || r.rid; } catch (e) { Logger.error('graph: get resource for related failed', e); }
         console.log(`  ${chalk.green(i + 1)}. ${chalk.cyan(r.rid)}  ${chalk.gray(name)}`);
         console.log(`     ${chalk.gray(r.reason)}  links=${r.linkCount}`);
       }
@@ -2170,7 +2167,7 @@ async function agentInfoHandler(argv) {
             console.log(`    [${m.type}] ${new Date(m.createdAt).toLocaleString()}`);
           }
         }
-      } catch {}
+      } catch (e) { Logger.error('graph: get agent memory for info failed', e); }
     }
 
     console.log('');

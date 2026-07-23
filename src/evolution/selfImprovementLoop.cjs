@@ -106,7 +106,7 @@ class SelfImprovementLoop {
 
   _emit(type, payload) {
     if (this.eventBus) {
-      try { this.eventBus.emit({ type, payload, source: 'evolution' }); } catch {}
+      try { this.eventBus.emit({ type, payload, source: 'evolution' }); } catch (e) { this.logger.error('selfImprovementLoop: event emit failed', e); }
     }
   }
 }

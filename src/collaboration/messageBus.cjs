@@ -40,7 +40,7 @@ class MessageBus {
           payload: { from: message.from, to: message.to, type: message.type },
           source: 'messagebus'
         });
-      } catch {}
+      } catch (e) { console.error('messageBus: message sent event emit failed', e); }
     }
 
     // 通知接收方
@@ -76,7 +76,7 @@ class MessageBus {
           payload: { from, type },
           source: 'messagebus'
         });
-      } catch {}
+      } catch (e) { console.error('messageBus: message broadcast event emit failed', e); }
     }
 
     // 通知所有订阅者

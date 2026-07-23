@@ -29,7 +29,7 @@ class AgentScheduler {
       this.eventBus.on('*', async (payload, event) => {
         try {
           await this.agentEngine.trigger(event);
-        } catch {}
+        } catch (e) { this.logger.error('agentScheduler: trigger agent by event failed', e); }
       });
     }
   }

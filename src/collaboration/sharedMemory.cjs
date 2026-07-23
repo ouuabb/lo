@@ -97,7 +97,7 @@ class SharedMemory {
 
   _hydrate(row) {
     let content = row.content;
-    try { content = JSON.parse(row.content); } catch {}
+    try { content = JSON.parse(row.content); } catch (e) { console.error('sharedMemory: JSON parse content failed', e); }
     return {
       id: row.entry_id,
       scope: row.scope,

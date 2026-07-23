@@ -162,7 +162,7 @@ class PolicyEngine {
     if (this.audit) {
       try {
         await this.audit.record(subject, action, resource, allowed, reason);
-      } catch {}
+      } catch (e) { this.logger.error('policyEngine: audit record failed', e); }
     }
   }
 }

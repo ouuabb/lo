@@ -79,20 +79,20 @@ class EventBus {
           // 执行中间件 beforeHandler
           let shouldRun = true;
           if (this._middleware) {
-            try {
-              const result = await this._middleware.run('beforeHandler', { event, handler });
-              if (result === false) shouldRun = false;
-            } catch {}
-          }
-
-          if (shouldRun) {
-            await handler(event.payload, event);
-
-            // 执行中间件 afterHandler
-            if (this._middleware) {
-              try { await this._middleware.run('afterHandler', { event, handler }); } catch {}
+              try {
+                const result = await this._middleware.run('beforeHandler', { event, handler });
+                if (result === false) shouldRun = false;
+              } catch (e) { console.error('eventBus: middleware beforeHandler failed', e); }
             }
-          }
+
+            if (shouldRun) {
+              await handler(event.payload, event);
+
+              // 执行中间件 afterHandler
+              if (this._middleware) {
+                try { await this._middleware.run('afterHandler', { event, handler }); } catch (e) { console.error('eventBus: middleware afterHandler failed', e); }
+              }
+            }
         } catch (e) {
           console.error(`[eventbus] Handler error for '${event.type}': ${e.message}`);
         }
@@ -109,7 +109,7 @@ class EventBus {
 
     // 执行中间件 afterEmit
     if (this._middleware) {
-      try { await this._middleware.run('afterEmit', event); } catch {}
+      try { await this._middleware.run('afterEmit', event); } catch (e) { console.error('eventBus: middleware afterEmit failed', e); }
     }
   }
 

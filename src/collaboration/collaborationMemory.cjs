@@ -21,7 +21,7 @@ class CollaborationMemory {
         `INSERT OR REPLACE INTO agent_messages (id, from_agent, to_agent, type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
         [message.id, message.from, message.to, message.type, payload, message.createdAt]
       );
-    } catch {}
+    } catch (e) { console.error('collaborationMemory: save message failed', e); }
   }
 
   /** 查询消息 */
@@ -48,7 +48,7 @@ class CollaborationMemory {
         `INSERT OR REPLACE INTO agent_teams (id, name, strategy) VALUES (?, ?, ?)`,
         [team.id, team.name, team.strategy]
       );
-    } catch {}
+    } catch (e) { console.error('collaborationMemory: save team failed', e); }
   }
 
   /** 列出团队 */
@@ -69,7 +69,7 @@ class CollaborationMemory {
         `INSERT OR REPLACE INTO agent_tasks (id, team_id, goal, status, result) VALUES (?, ?, ?, ?, ?)`,
         [task.id, task.teamId, task.goal, task.status, result]
       );
-    } catch {}
+    } catch (e) { console.error('collaborationMemory: save task failed', e); }
   }
 
   /** 查询任务 */

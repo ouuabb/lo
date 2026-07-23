@@ -22,7 +22,7 @@ class CollaborationScheduler {
       this.eventBus.on('*', async (payload, event) => {
         try {
           await this.engine.triggerByEvent(event.type, payload);
-        } catch {}
+        } catch (e) { this.logger.error('collaborationScheduler: trigger by event failed', e); }
       });
     }
   }

@@ -50,7 +50,7 @@ class AgentStore {
         [run.id, run.agentId, run.status,
          JSON.stringify(run.input), JSON.stringify(run.output), run.createdAt]
       );
-    } catch {}
+    } catch (e) { console.error('agentStore: save run failed', e); }
   }
 
   async listRuns(agentId, limit = 20) {

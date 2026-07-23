@@ -120,7 +120,7 @@ class AIOS {
     if (this.repository) {
       try {
         result.repository = await this.repository.getStats();
-      } catch {}
+      } catch (e) { console.error('aiOS: get repository stats failed', e); }
     }
 
     return result;

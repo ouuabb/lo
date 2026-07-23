@@ -81,9 +81,9 @@ class EvolutionMemory {
 
   _hydrate(row) {
     let fromState = row.strategy;
-    try { fromState = JSON.parse(row.strategy || 'null'); } catch {}
+    try { fromState = JSON.parse(row.strategy || 'null'); } catch (e) { console.error('evolutionMemory: JSON parse fromState failed', e); }
     let resultObj = {};
-    try { resultObj = JSON.parse(row.result || '{}'); } catch {}
+    try { resultObj = JSON.parse(row.result || '{}'); } catch (e) { console.error('evolutionMemory: JSON parse result failed', e); }
     return {
       id: row.id,
       fromState,

@@ -236,7 +236,8 @@ class Repository {
             return;
           }
         }
-      } catch {
+      } catch (e) {
+        require('../utils/logger.cjs').error('repository: 解析SSH密钥配置失败', e);
         // 解析失败，尝试降级方案
       }
     }
@@ -380,7 +381,7 @@ class Repository {
 
     // 如果是 .md 文件，自动解析并同步 [[...]] wikilink
     if (resource && resource.path.toLowerCase().endsWith('.md')) {
-      try { await this.syncWikilinks(resource.rid); } catch (e) {}
+      try { await this.syncWikilinks(resource.rid); } catch (e) { require('../utils/logger.cjs').error('repository: 同步wikilinks失败', e); }
     }
     return resource;
   }
@@ -1675,9 +1676,9 @@ class Repository {
       async runAll() {
         const repo = this._repo;
         services.graphEngine = await repo._getGraphEngine();
-        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch {}
-        try { services.recommendationEngine = await repo._getRecommendationEngine(); } catch {}
-        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch {}
+        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化knowledgeAnalyzer失败', e); }
+        try { services.recommendationEngine = await repo._getRecommendationEngine(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化recommendationEngine失败', e); }
+        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化knowledgeRepair失败', e); }
         const se = new SuggestionEngine(repo.db);
         services.suggestionEngine = se;
         const scheduler = new KnowledgeScheduler(repo.db, services);
@@ -1691,16 +1692,16 @@ class Repository {
       },
       async analyzeHealth() {
         const repo = this._repo;
-        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch {}
-        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch {}
+        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化knowledgeAnalyzer失败', e); }
+        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化knowledgeRepair失败', e); }
         const scheduler = new KnowledgeScheduler(repo.db, services);
         return scheduler.analyzeKnowledgeHealth();
       },
       async generateReport() {
         const repo = this._repo;
         services.graphEngine = await repo._getGraphEngine();
-        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch {}
-        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch {}
+        try { services.knowledgeAnalyzer = await repo._getKnowledgeAnalyzer(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化knowledgeAnalyzer失败', e); }
+        try { services.knowledgeRepair = await repo._getKnowledgeRepair(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化knowledgeRepair失败', e); }
         const scheduler = new KnowledgeScheduler(repo.db, services);
         return scheduler.generateKnowledgeReport();
       }
@@ -1732,7 +1733,7 @@ class Repository {
       const engine = await this._getGraphEngine();
       const pr = engine.pageRank({ iterations: 20, damping: 0.85 });
       for (const r of pr) pageRanks.set(r.rid, r.score);
-    } catch {}
+    } catch (e) { require('../utils/logger.cjs').error('repository: 计算PageRank失败', e); }
 
     const inputs = resources.map(r => ({
       rid: r.rid,
@@ -2011,7 +2012,7 @@ class Repository {
     const ee = new KnowledgeEvolutionEngine(this.db, engine);
 
     let pe = null;
-    try { pe = await this._getPatternEngine(); } catch {}
+    try { pe = await this._getPatternEngine(); } catch (e) { require('../utils/logger.cjs').error('repository: 初始化patternEngine失败', e); }
 
     const se = new KnowledgeStrategyEngine(this.db, {
       graphEngine: engine,
@@ -2059,7 +2060,7 @@ class Repository {
 
       const gr = await ee.growthRate(30);
       growth = gr.rate;
-    } catch {}
+    } catch (e) { require('../utils/logger.cjs').error('repository: 计算知识快照指标失败', e); }
 
     return em.createSnapshot({
       resourceCount: resCount ? resCount.c : 0,

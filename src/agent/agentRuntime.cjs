@@ -107,7 +107,7 @@ class AgentRuntime {
           payload: { agentId: this.agent.id, goal, planSteps: plan.length },
           source: 'agent'
         });
-      } catch {}
+      } catch (e) { this.logger.error('agentRuntime: agent started event emit failed', e); }
     }
 
     // 5. Execute — 执行
@@ -149,7 +149,7 @@ class AgentRuntime {
           payload: { agentId: this.agent.id, success: executionResult.success },
           source: 'agent'
         });
-      } catch {}
+      } catch (e) { this.logger.error('agentRuntime: agent finished event emit failed', e); }
     }
 
     // 回 waiting 状态

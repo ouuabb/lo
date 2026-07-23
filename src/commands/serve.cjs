@@ -191,7 +191,7 @@ function verifySshSignature(nonce, publicKey, signatureBase64) {
   } catch {
     return false;
   } finally {
-    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (e) { console.error('serve: 清理SSH验证临时目录失败', e); }
   }
 }
 
@@ -643,14 +643,14 @@ route('GET', '/api/admin/stats', async (req, res, { repo }) => {
     try {
       const row = await repo.db.get('SELECT COUNT(*) as c FROM ai_suggestions');
       suggestionCount = row ? row.c : 0;
-    } catch {}
+    } catch (e) { console.error('serve: 获取建议统计失败', e); }
 
     // containers 数量
     let containerCount = 0;
     try {
       const row = await repo.db.get("SELECT COUNT(*) as c FROM resources WHERE type = 'container' AND deleted = 0");
       containerCount = row ? row.c : 0;
-    } catch {}
+    } catch (e) { console.error('serve: 获取容器统计失败', e); }
 
     // tags/categories（从 metadata 提取）
     const allResources = await repo.getAllResources();
@@ -664,11 +664,11 @@ route('GET', '/api/admin/stats', async (req, res, { repo }) => {
 
     // agents 数量
     let agentCount = 0;
-    try { agentCount = (await repo.listAgents()).length; } catch {}
+    try { agentCount = (await repo.listAgents()).length; } catch (e) { console.error('serve: 获取agent统计失败', e); }
 
     // workflows 数量
     let workflowCount = 0;
-    try { workflowCount = (await repo.listWorkflows()).length; } catch {}
+    try { workflowCount = (await repo.listWorkflows()).length; } catch (e) { console.error('serve: 获取workflow统计失败', e); }
 
     jsonOk(res, {
       resources: stats.totalResources,
@@ -741,7 +741,7 @@ route('GET', '/api/admin/resources/:rid', async (req, res, { repo, url }) => {
     let relations = { outgoing: [], incoming: [] };
     try {
       relations = await repo.getRelations(rid);
-    } catch {}
+    } catch (e) { console.error('serve: 获取资源关系失败', e); }
 
     // 获取标签（从 resource_tags 表）
     let tags = [];
@@ -750,7 +750,7 @@ route('GET', '/api/admin/resources/:rid', async (req, res, { repo, url }) => {
         'SELECT tag FROM resource_tags WHERE resource_rid = ?', [rid]
       );
       tags = tagRows.map(r => r.tag);
-    } catch {}
+    } catch (e) { console.error('serve: 获取资源标签失败', e); }
 
     jsonOk(res, {
       ...resource,
@@ -789,7 +789,7 @@ route('GET', '/api/admin/graph', async (req, res, { repo, url }) => {
 
     const edges = rels.map(r => {
       let label = '';
-      try { const m = JSON.parse(r.metadata || '{}'); label = m.label || m.title || ''; } catch {}
+      try { const m = JSON.parse(r.metadata || '{}'); label = m.label || m.title || ''; } catch (e) { console.error('serve: 解析关系元数据失败', e); }
       return {
         id: r.id,
         from: r.from_rid,
@@ -1515,7 +1515,7 @@ route('GET', '/api/admin/categories', async (req, res, { repo }) => {
         if (cat && cat.trim()) {
           catCounts[cat] = (catCounts[cat] || 0) + 1;
         }
-      } catch {}
+      } catch (e) { console.error('serve: 解析资源分类失败', e); }
     }
     const data = Object.entries(catCounts)
       .map(([category, count]) => ({ category, count }))
@@ -1712,6 +1712,11 @@ module.exports = async function serve(argv) {
   const host = '127.0.0.1';
   const serveSpa = argv.serveSpa === true;
 
+  // Admin API 共享密钥认证
+  // 设置环境变量 LO_ADMIN_TOKEN 启用 Admin API 保护
+  // 未设置时 Admin API 无认证（仅限本地开发）
+  const adminToken = process.env.LO_ADMIN_TOKEN || argv['admin-token'] || null;
+
   // 打开仓库
   const repo = new Repository(repoPath);
 
@@ -1782,8 +1787,22 @@ module.exports = async function serve(argv) {
       || pathname === '/api/auth/login'
       || pathname === '/api/auth/reload';
 
-    // Admin 端点：本地无需认证（监听 127.0.0.1）
+    // Admin 端点：使用共享密钥认证（LO_ADMIN_TOKEN）
     if (isAdminEndpoint) {
+      if (adminToken) {
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+        if (token !== adminToken) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'Unauthorized',
+            hint: 'Admin API 需要 Bearer token 认证。设置 LO_ADMIN_TOKEN 环境变量或在请求头中携带 Authorization: Bearer <token>'
+          }));
+          return;
+        }
+      }
+
       const handler = matchRoute(method, pathname);
       if (!handler) {
         return notFound(res, `No route for ${method} ${pathname}`);
@@ -1865,7 +1884,12 @@ module.exports = async function serve(argv) {
   }
 
   if (serveSpa) {
-    console.log(chalk.gray(`  Admin API: /api/admin/*（独立密码认证）`));
+    if (adminToken) {
+      console.log(chalk.gray(`  Admin API: /api/admin/*（LO_ADMIN_TOKEN 已启用）`));
+    } else {
+      console.log(chalk.yellow(`  Admin API: /api/admin/*（⚠ 未设置 LO_ADMIN_TOKEN，无认证保护）`));
+      console.log(chalk.gray(`  设置环境变量 LO_ADMIN_TOKEN=<your-token> 以启用 Admin API 认证`));
+    }
   }
 
   console.log(chalk.gray(`  按 Ctrl+C 停止`));

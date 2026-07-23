@@ -40,7 +40,7 @@ class AIContext {
         const stats = await this.repository.getStats();
         parts.push(`Resources: ${stats.resourceCount || '?'}`);
         parts.push(`Relations: ${stats.relationCount || '?'}`);
-      } catch {}
+      } catch (e) { this.logger.error('aiContext: get repository stats failed', e); }
     }
 
     if (this.semanticMemory) {

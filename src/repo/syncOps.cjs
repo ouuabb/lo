@@ -321,7 +321,7 @@ class SyncOpsEngine {
 
         // 删除磁盘文件
         const filePath = path.join(this.repoPath, data.path);
-        try { await fs.remove(filePath); } catch {}
+        try { await fs.remove(filePath); } catch (e) { Logger.error('syncOps: 删除资源文件失败', e); }
         break;
       }
 

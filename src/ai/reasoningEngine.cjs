@@ -50,7 +50,7 @@ class ReasoningEngine {
         const graphAnalysis = await this.knowledgeReasoner.analyzeGraph();
         evidence.push({ source: 'graph_analysis', data: graphAnalysis });
         thoughts.push({ step: 'graph_analysis', content: `Graph analyzed: ${graphAnalysis.nodeCount || 0} nodes, ${graphAnalysis.edgeCount || 0} edges` });
-      } catch {}
+      } catch (e) { this.logger.error('reasoningEngine: graph analysis failed', e); }
     }
 
     // Step 4: 知识缺口
@@ -59,7 +59,7 @@ class ReasoningEngine {
         const gaps = await this.knowledgeReasoner.detectKnowledgeGaps();
         evidence.push({ source: 'knowledge_gaps', items: gaps.length });
         thoughts.push({ step: 'gap_detection', content: `Found ${gaps.length} knowledge gaps` });
-      } catch {}
+      } catch (e) { this.logger.error('reasoningEngine: knowledge gap detection failed', e); }
     }
 
     // Step 5: 概念发现
@@ -68,7 +68,7 @@ class ReasoningEngine {
         const concepts = await this.conceptMemory.search(request.input, 3);
         evidence.push({ source: 'concept_memory', items: concepts.length });
         thoughts.push({ step: 'concept_search', content: `Found ${concepts.length} related concepts` });
-      } catch {}
+      } catch (e) { this.logger.error('reasoningEngine: concept search failed', e); }
     }
 
     // Conclusion

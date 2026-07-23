@@ -66,7 +66,7 @@ class WorkflowExecutor {
           type: 'workflow.started',
           payload: { workflowId: workflow.id, executionId: execId }
         });
-      } catch {}
+      } catch (e) { this.logger.error('workflowExecutor: workflow started event emit failed', e); }
     }
 
     try {
@@ -134,7 +134,7 @@ class WorkflowExecutor {
             type: 'workflow.finished',
             payload: { workflowId: workflow.id, executionId: execId, status: 'failed' }
           });
-        } catch {}
+        } catch (e) { this.logger.error('workflowExecutor: workflow failed event emit failed', e); }
       }
     }
 
@@ -146,7 +146,7 @@ class WorkflowExecutor {
             type: 'workflow.finished',
             payload: { workflowId: workflow.id, executionId: execId, status: 'completed' }
           });
-        } catch {}
+        } catch (e) { this.logger.error('workflowExecutor: workflow completed event emit failed', e); }
       }
     }
 
